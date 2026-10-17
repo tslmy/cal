@@ -14,11 +14,9 @@ import type { CalEvent, ChangeSet, EventDraft, Operation, Precision, TraceStep, 
 // offline parser) only writes steps with filters; code resolves every filter to concrete event
 // ids before anything is shown or written (E12).
 
-// Nemotron writes full ISO times ("2026-10-21T19:00:00") and keeps doing so when asked to fix it,
-// so trim seconds and zones (and the time, where only a date is wanted) before checking the shape.
-const trimTime = (s: string) => s.trim().replace(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/, "$1");
-const day = z.string().transform((s) => trimTime(s).slice(0, 10)).pipe(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"));
-const time = z.string().transform(trimTime).pipe(z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/, "YYYY-MM-DD or YYYY-MM-DDTHH:mm"));
+// tidyPlan below trims seconds; date-only fields also drop a time ("2026-10-24T00:00" -> "2026-10-24").
+const day = z.string().transform((s) => (/^\d{4}-\d{2}-\d{2}T/.test(s) ? s.slice(0, 10) : s)).pipe(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"));
+const time = z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/, "YYYY-MM-DD or YYYY-MM-DDTHH:mm");
 const Filter = z.object({
   from: day,
   to: day,
