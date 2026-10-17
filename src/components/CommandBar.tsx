@@ -232,9 +232,15 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
             autoComplete="off"
             className="min-h-11 min-w-0 flex-1 rounded-full border border-line-strong bg-white px-4 focus:border-ink focus:outline-none"
           />
-          <button type="submit" disabled={busy || !text.trim()} className="min-h-11 shrink-0 rounded-full bg-[#0B84FE] px-4 font-semibold text-white disabled:opacity-60">
-            {parse.isPending && !replay ? "Reading..." : "Send"}
-          </button>
+          {replay ? (
+            <button type="button" onClick={() => (stop.current = true)} className="min-h-11 shrink-0 rounded-full border border-line-strong bg-white px-4 font-semibold">
+              Stop ({replay.at} of {replay.of})
+            </button>
+          ) : (
+            <button type="submit" disabled={busy || !text.trim()} className="min-h-11 shrink-0 rounded-full bg-[#0B84FE] px-4 font-semibold text-white disabled:opacity-60">
+              {parse.isPending ? "Reading..." : "Send"}
+            </button>
+          )}
         </form>
         {children}
       </div>
