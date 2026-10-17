@@ -45,6 +45,7 @@ export type InteractionKind =
   | "view_switch"
   | "proposal_shown" | "proposal_accepted" | "proposal_dismissed" | "proposal_reverted"
   | "belief_deleted"
+  | "settings_changed"
   | "dwell"; // time spent in a view
 
 export type Interaction = {
@@ -76,6 +77,7 @@ export type Proposal = {
   spec: CalendarSpec;
   status: "suggested" | "accepted" | "dismissed" | "undone";
   beliefKeys?: string[];
+  beliefConfidence?: Record<string, number>; // confidence of each relied-on belief when shown, for P19
   promptVersions?: Record<string, number>; // agent -> version used to make it
   novel?: boolean; // an invented view rather than a classic month or week
   previous?: CalendarSpec; // the view it replaced, for Undo
