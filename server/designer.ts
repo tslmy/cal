@@ -94,10 +94,10 @@ function parseJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-async function callModel(system: string, prompt: string, temperature: number): Promise<string> {
+async function callModel(system: string, prompt: string, temperature: number, model: string = MODEL): Promise<string> {
   for (let attempt = 0; ; attempt++) {
     try {
-      const { text } = await generateText({ model: crusoe!(MODEL), system, prompt, temperature, maxOutputTokens: 6000 });
+      const { text } = await generateText({ model: crusoe!(model), system, prompt, temperature, maxOutputTokens: 6000 });
       return text;
     } catch (err) {
       const status = (err as { statusCode?: number }).statusCode;
@@ -157,6 +157,32 @@ async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceS
   return null;
 }
 
+// The lead critic (planner model) picks among drafts that already passed the mechanical checks.
+// Falls back to the mechanical score if its answer is unusable.
+async function judge(p: Persona, drafts: { title: string; reason: string; spec: CalendarSpec; score: number }[], trace: TraceStep[]) {
+  const list = drafts.map((d, i) => `${i}. "${d.title}": ${d.reason}\n   views: ${Object.values(d.spec.elements).map((e) => `${e.type}${JSON.stringify(e.props)}`).join(", ")}`);
+  const prompt = [
+    `What the habit agent has learned about ${p.name}:`,
+    ...p.profile.facts.map((f) => `- ${f}`),
+    "",
+    "Candidate view changes (all already pass the visibility checks):",
+    ...list,
+    "",
+    'Pick the one that best fits these habits as a small, explainable step. Reply with JSON only: {"pick": <index>, "why": "<one sentence>"}',
+  ].join("\n");
+  try {
+    const out = parseJson(await callModel("You are the lead critic of a calendar design team.", prompt, 0.2, MODELS.planner)) as { pick?: number; why?: string };
+    const d = drafts[Number(out.pick)];
+    if (d) {
+      trace.push({ role: "Critic", text: `Lead critic (${MODELS.planner}) picked "${d.title}": ${out.why ?? ""}` });
+      return d;
+    }
+  } catch (err) {
+    trace.push({ role: "Critic", text: `Lead critic unavailable (${(err as Error).message}); using the checks' ranking.` });
+  }
+  return drafts[0];
+}
+
 export async function design(p: Persona, req: DesignRequest): Promise<DesignResponse> {
   const trace: TraceStep[] = [
     { role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${DRAFTS} draft designers${crusoe ? ` on ${MODEL}` : " (offline mock: no CRUSOE_API_KEY)"}.` },
@@ -168,7 +194,8 @@ export async function design(p: Persona, req: DesignRequest): Promise<DesignResp
     trace.push({ role: "Designer", text: none ? "Nothing to suggest right now." : "No draft passed the checks. Keeping the current view." });
     return { mode: crusoe ? "live" : "mock", proposal: null, trace };
   }
-  const best = good.sort((a, b) => b.score - a.score)[0];
+  good.sort((a, b) => b.score - a.score);
+  const best = crusoe && good.length > 1 ? await judge(p, good, trace) : good[0];
   trace.push({ role: "Designer", text: `Picked "${best.title}" out of ${good.length} passing draft${good.length > 1 ? "s" : ""}. Offering it as a suggestion.` });
   return {
     mode: crusoe ? "live" : "mock",

@@ -1,5 +1,8 @@
 // One Nemotron model per agent role, all on Crusoe's OpenAI-compatible endpoint.
 // Rate limits are per model, so spreading roles across models gives more headroom.
+// planner: lead critic that picks among passing drafts (and the future planner agent)
+// designer: the parallel draft designers
+// observer: the future habit agent; router: small high-volume calls
 export const MODELS = {
   planner: process.env.MODEL_PLANNER ?? "nvidia/Nemotron-3-Super-120B-A12B",
   designer: process.env.MODEL_DESIGNER ?? "nvidia/nemotron-3.5-lightning-30b-a3b",

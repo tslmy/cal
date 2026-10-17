@@ -18,7 +18,7 @@ npm run dev            # web on :5173, designer agent on :8787
 - `server/designer.ts`: the designer agent. System prompt with its rules, then N parallel draft designers (`DESIGNER_DRAFTS`), each checked by the critic and repaired with the critic's feedback up to `DESIGNER_REPAIRS` times. The best passing draft is offered as a suggestion.
 - `src/shared/critic.ts`: mechanical checks, no LLM. Every event this week and every plan of a week or longer ahead must be visible; week grids may not cut off meetings; the spec must match the catalog; the proposal must differ from the current view.
 - `server/mock.ts`: offline stand-in for the model. Some first drafts are deliberately flawed so the critic and repair loop show up in the activity panel.
-- `server/models.ts`: one Nemotron model per agent role on Crusoe's OpenAI-compatible endpoint (rate limits are per model).
+- `server/models.ts`: one Nemotron model per agent role on Crusoe's OpenAI-compatible endpoint (rate limits are per model). Draft designers run on Nemotron 3.5 Lightning 30B; the lead critic that picks among passing drafts runs on Nemotron 3 Super 120B; Nano 30B is set aside for small high-volume calls such as the future habit agent's classification.
 - `src/registry.tsx`: React implementations. Every day, week and month gets a stable Motion `layoutId` (`day-2026-10-17`, `week-2026-42`, `month-2026-10`), so any two views morph into each other, including views the designer invents later.
 - `src/App.tsx`: suggestion card (Try it / Not now), view switches with Undo, what the habit agent has learned, and the agent activity log.
 - `src/shared/personas.ts`: three sample users (Mina, Jordan, Sam) with events and learned profiles. The profiles stand in for the habit agent until it exists.
