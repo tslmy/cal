@@ -13,6 +13,10 @@ const THINKING = process.env.DESIGNER_THINKING === "1";
 const IN_FLIGHT = Number(process.env.DESIGNER_CONCURRENCY ?? 2);
 const BASE_URL = process.env.CRUSOE_BASE_URL ?? "https://api.inference.crusoecloud.com/v1";
 const VALIDATION_RETRIES = 2;
+// Output cap per call. A reply cut off at the cap (a long bulk import, or reasoning that ran on)
+// is asked for again with double the cap, up to MAX_TOKENS.
+const FIRST_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 8000);
+const MAX_TOKENS = 64000;
 
 export const crusoe = process.env.CRUSOE_API_KEY
   ? createOpenAICompatible({ name: "crusoe", baseURL: BASE_URL, apiKey: process.env.CRUSOE_API_KEY })
@@ -71,6 +75,7 @@ export async function callModel(system: string, prompt: string, opts: { role?: R
   // Every agent, not just the designer, needs the ids checked against what the endpoint serves.
   await checkModels();
   const model = opts.model ?? MODELS[opts.role ?? "designer"];
+  let cap = FIRST_TOKENS;
   for (let attempt = 0; ; attempt++) {
     try {
       const { text, finishReason } = await slot(model, () =>
@@ -79,12 +84,20 @@ export async function callModel(system: string, prompt: string, opts: { role?: R
           system,
           prompt,
           temperature: opts.temperature ?? 0.3,
-          maxOutputTokens: 6000,
+          maxOutputTokens: cap,
           maxRetries: 0, // retried below, with longer waits that fit a per-minute limit
           providerOptions: extras ? { crusoe: { response_format: { type: "json_object" }, chat_template_kwargs: { enable_thinking: THINKING } } } : {},
         }),
       );
-      if (!text.trim() && finishReason === "length") return "(ran out of tokens before answering)";
+      if (finishReason === "length") {
+        if (cap < MAX_TOKENS) {
+          cap = Math.min(MAX_TOKENS, cap * 2);
+          console.warn(`[llm] ${model} hit the output cap; asking again with ${cap} tokens.`);
+          attempt--; // not a rate-limit retry
+          continue;
+        }
+        if (!text.trim()) return "(ran out of tokens before answering)";
+      }
       return text;
     } catch (err) {
       const e = err as { statusCode?: number; responseHeaders?: Record<string, string> };

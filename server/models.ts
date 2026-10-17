@@ -9,7 +9,7 @@ export const MODELS = {
   designer: process.env.MODEL_DESIGNER ?? "nvidia/Nemotron-3.5-Lightning-30B-A3B",
   observer: process.env.MODEL_OBSERVER ?? "nvidia/Nemotron-3.5-Lightning-30B-A3B",
   router: process.env.MODEL_ROUTER ?? "nvidia/Nemotron-3-Nano-30B-A3B",
-  intent: process.env.MODEL_INTENT ?? "openai/gpt-oss-120b",
+  intent: process.env.MODEL_INTENT ?? "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B",
 };
 
 type Role = keyof typeof MODELS;

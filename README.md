@@ -46,7 +46,7 @@ sentence / file ─▶ intent parser / importer ─▶ change set (preview, appl
 
 | Agent | File | Model (Crusoe) |
 |---|---|---|
-| Intent parser | `server/agents/intent.ts` | `openai/gpt-oss-120b` (role `intent`) |
+| Intent parser | `server/agents/intent.ts` | Nemotron 3 Super (role `intent`) |
 | Importer | `server/agents/importer.ts` (.ics in code with ical.js; email with mailparser plus a model) | Nemotron 3.5 Lightning |
 | Habit learner | `server/agents/habit.ts` | Nemotron 3 Nano (role `router`) |
 | Meta-learner | `server/agents/meta.ts` | Nemotron 3 Super (role `planner`) |
@@ -54,7 +54,7 @@ sentence / file ─▶ intent parser / importer ─▶ change set (preview, appl
 | Proposal gate and loop | `server/loop.ts` | plain code |
 
 - **Prompts** (`server/prompts.ts`): each agent's system prompt is a fixed core followed by a learned "About this person" section. Only the meta-learner writes the learned part, and the core stays byte-identical so the prefix cache still hits. Each rewrite is stored as a version with its diff, reason and evidence. It is replayed against the person and the sample personas before adoption, and rolled back automatically after two reverts of proposals made under it.
-- **Model calls** (`server/llm.ts`): JSON validated with Zod and retried with the validation error. Each model has its own queue under Crusoe's per-model rate limit, with backoff on 429 and 503.
+- **Model calls** (`server/llm.ts`): JSON validated with Zod and retried with the validation error. Each model has its own queue under Crusoe's per-model rate limit, with backoff on 429 and 503. A reply cut off at the token cap (a long bulk import) is asked for again with double the cap, up to 64k tokens.
 - **Replay cache** (`server/cache.ts`): the intent parser's live answers are cached in `cache/llm.json`, keyed by model, source and the exact text. Re-running the same sentences or text files is instant, which helps when fast-forwarding a demo. The cache stores plans with filters rather than event ids, so a replayed plan still resolves against the current events. Set `LLM_CACHE=0` to turn it off, or delete the file to start over.
 - **Developer tools** (`src/components/DevTools.tsx`): the demo-only controls (who you act as, time scrubbing, the agent trace) sit in a collapsible sidebar outside the calendar spec, so the designer can never propose changes to them.
 - **State** (`server/store.ts`): one JSON file via lowdb, holding events, the interaction log, beliefs, proposals, prompt versions and activity.
