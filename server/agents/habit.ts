@@ -294,7 +294,7 @@ async function phrase(s: UserState, p: Plan): Promise<string | null> {
   try {
     // Cached so a replayed history words its habits the same way; the designer's prompt quotes
     // them, so its cached answers only replay when these match.
-    const out = await structured(Phrased, systemFor(CORE, s, "habit"), JSON.stringify(list.map((b) => ({ key: b.key, value: b.value, statement: b.statement, confidence: b.confidence, evidence: b.evidence.length }))), { role: "router", temperature: 0.2, cache: true });
+    const out = await structured(Phrased, systemFor(CORE, s, "habit"), JSON.stringify(list.map((b) => ({ key: b.key, value: b.value, statement: b.statement, confidence: b.confidence, evidence: b.evidence.length }))), { role: "router", temperature: 0.2 });
     for (const o of out.beliefs) {
       const b = list.find((x) => x.key === o.key);
       if (!b) continue;

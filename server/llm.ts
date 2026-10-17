@@ -74,14 +74,23 @@ async function slot<T>(model: string, run: () => Promise<T>): Promise<T> {
 
 export type Role = keyof typeof MODELS;
 
+// Model ids whose cached answers still replay, so earlier runs aren't paid for twice.
+const EARLIER = ["openai/gpt-oss-120b"];
+
 // One raw call. Throws ModelError for API problems.
-// `cache: true` replays an earlier answer to the exact same call from the replay cache, so a
-// rehearsed demo doesn't wait on (or pay for) the same inference twice.
+// Every call replays an earlier answer to the same system prompt, prompt and temperature from the
+// replay cache (the exact model first, then any model), so a rehearsed demo doesn't wait on (or
+// pay for) the same inference twice. `cache: false` forces a fresh call.
 export async function callModel(system: string, prompt: string, opts: { role?: Role; model?: string; temperature?: number; cache?: boolean } = {}): Promise<string> {
   // Every agent, not just the designer, needs the ids checked against what the endpoint serves.
   await checkModels();
   const model = opts.model ?? MODELS[opts.role ?? "designer"];
-  if (opts.cache) return (await cached(["call", model, system, prompt, opts.temperature ?? 0.3], () => callModel(system, prompt, { ...opts, model, cache: false }))).value;
+  if (opts.cache !== false) {
+    const t = opts.temperature ?? 0.3;
+    const others = [...new Set([...Object.values(MODELS), ...EARLIER])].filter((m) => m !== model);
+    return (await cached(["call", model, system, prompt, t], () => callModel(system, prompt, { ...opts, model, cache: false }),
+      [["call", system, prompt, t], ...others.map((m) => ["call", m, system, prompt, t])])).value;
+  }
   let cap = FIRST_TOKENS;
   for (let attempt = 0; ; attempt++) {
     try {
