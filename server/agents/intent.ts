@@ -154,6 +154,15 @@ function occurrences(first: EventDraft, repeat: z.infer<typeof Repeat> | null | 
   return out.length ? out : [first];
 }
 
+// The same event added twice ("bake cookies next Saturday" after moving the cookies there, or a
+// picked-up shift the rotation already added): same day, one title contained in the other, and
+// starting within two hours when both are timed.
+function same(e: CalEvent, d: EventDraft): boolean {
+  if (e.start.slice(0, 10) !== d.start.slice(0, 10)) return false;
+  if (!titleHas(e, d.title.replace(/\b(bake|do|make|go to|have|picked up|an extra|extra)\b/gi, " ")) && !titleHas({ ...e, title: d.title }, e.title)) return false;
+  return e.start.length <= 10 || d.start.length <= 10 || Math.abs(minutesBetween(e.start, d.start)) <= 120;
+}
+
 export function resolve(state: UserState, steps: Step[], source: "typed" | "text"): ChangeSet {
   // Steps run in order against a working copy, so a later line can move or cancel an event an
   // earlier line of the same note added ("move the dog walk to Tuesday").
@@ -161,12 +170,15 @@ export function resolve(state: UserState, steps: Step[], source: "typed" | "text
   const ops: (Operation | null)[] = [];
   const at = new Map<string, number>(); // event id (or temp id of a new event) -> index of its op
   const answers: string[] = [];
+  const skipped: string[] = [];
   steps.forEach((st, n) => {
     if (st.op === "query") {
       answers.push(answerFor([...work.values()], st.filter));
     } else if (st.op === "create") {
       const first: EventDraft = { title: st.title, ...span(st.start, st.end), category: st.category, precision: st.precision, source };
       occurrences(first, st.repeat).forEach((event, k) => {
+        const twin = [...work.values()].find((e) => same(e, event));
+        if (twin) return void skipped.push(`"${twin.title}" is already on ${fmtWhen(twin)}`);
         const id = `new-${n}-${k}`;
         work.set(id, { ...event, id });
         at.set(id, ops.push({ op: "create", event }) - 1);
@@ -189,6 +201,7 @@ export function resolve(state: UserState, steps: Step[], source: "typed" | "text
       }
     }
   });
+  if (skipped.length) answers.push(`Skipped ${skipped.length === 1 ? "an event" : `${skipped.length} events`} already on the calendar: ${skipped.slice(0, 3).join("; ")}${skipped.length > 3 ? "; and more" : ""}.`);
   return finish(steps, ops.filter((o): o is Operation => !!o), answers, source);
 }
 
@@ -232,10 +245,17 @@ function when(text: string): When | null {
   // A bare "night" or "morning" is part of a title ("night shift"), not a time.
   const results = chrono.parse(text, REF(), { forwardDate: true }).filter((r) => !/^(night|morning|evening|afternoon)$/i.test(r.text));
   if (!results.length) return null;
-  const dated = results.find((r) => r.start.isCertain("day") || r.start.isCertain("weekday"));
+  // "Thursday the 29th": the day of the month wins over the weekday.
+  const dated = results.find((r) => r.start.isCertain("day")) ?? results.find((r) => r.start.isCertain("weekday"));
   const timed = results.find((r) => r.start.isCertain("hour"));
-  const date = ymd((dated ?? results[0]).start);
-  const out: When = { from: date, to: date, precision: "day", text: results.map((r) => r.text) };
+  // chrono skips "the 29th": take that day of this month, or next month once it has passed.
+  const nth = text.match(/\bthe (\d{1,2})(?:st|nd|rd|th)\b/i);
+  const nthDate = nth && !dated?.start.isCertain("day") ? [TODAY.slice(0, 8), addDays(`${TODAY.slice(0, 7)}-01`, 31).slice(0, 8)].map((m) => `${m}${pad(Number(nth[1]))}`).find((d) => d >= TODAY) : null;
+  const date = nthDate ?? ymd((dated ?? results[0]).start);
+  const out: When = { from: date, to: date, precision: "day", text: [...results.map((r) => r.text), ...(nthDate ? [nth![0]] : [])] };
+  // "November 16 to November 22" is one result with an end date.
+  const until = dated?.end?.isCertain("day") ? ymd(dated.end) : null;
+  if (until && until > date && !timed) Object.assign(out, { to: until, precision: "span" });
   if (timed) {
     out.start = `${date}T${hm(timed.start)}`;
     out.end = timed.end?.isCertain("hour") ? `${date}T${hm(timed.end)}` : addMinutes(out.start, 60);
