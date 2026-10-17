@@ -30,7 +30,44 @@ const Step = z.discriminatedUnion("op", [
   z.object({ op: z.literal("delete"), filter: Filter }),
   z.object({ op: z.literal("query"), filter: Filter }),
 ]);
-const Plan = z.object({ steps: z.array(Step) });
+// Fixes the near misses models make before validating, so they don't cost a retry or fall back
+// to the offline parser: a bare array or one step instead of {steps}, op synonyms ("add",
+// "move", "cancel"), "" for unused fields, seconds on times, numbers as strings, Mon-style days
+// and a missing category or precision.
+const OPS: Record<string, string> = { add: "create", new: "create", insert: "create", move: "update", edit: "update", change: "update", reschedule: "update", remove: "delete", cancel: "delete", find: "query", list: "query", read: "query" };
+const clean = (v: unknown): unknown => {
+  if (v === "" || v === "null") return null;
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/.test(v)) return v.slice(0, 10) + "T" + v.slice(11, 16);
+  if (typeof v === "string" && /^\d{2}:\d{2}:\d{2}$/.test(v)) return v.slice(0, 5);
+  if (Array.isArray(v)) return v.map(clean);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clean(x)]));
+  return v;
+};
+function tidyPlan(raw: unknown): unknown {
+  const r = clean(raw) as Record<string, unknown> | unknown[] | null;
+  const steps = Array.isArray(r) ? r : r && Array.isArray(r.steps) ? r.steps : r && typeof r === "object" && "op" in r ? [r] : r && typeof r === "object" ? (Object.values(r).find(Array.isArray) ?? []) : [];
+  return {
+    steps: (steps as Record<string, unknown>[]).filter((x) => x && typeof x === "object").map((x) => {
+      const op = String(x.op ?? x.action ?? x.type ?? "").toLowerCase();
+      const st: Record<string, unknown> = { ...x, op: OPS[op] ?? op };
+      if (typeof st.shiftDays === "string") st.shiftDays = Number(st.shiftDays);
+      if (st.op === "create") {
+        st.category ??= "Personal";
+        st.precision ??= String(st.start ?? "").length > 10 ? "exact" : "day";
+        st.end ??= st.start;
+        const rep = st.repeat as { days?: unknown } | null | undefined;
+        if (rep && Array.isArray(rep.days)) rep.days = rep.days.map((d) => String(d).slice(0, 3).toLowerCase());
+      }
+      const f = st.filter as Record<string, unknown> | null | undefined;
+      if (f && typeof f === "object") {
+        f.to ??= f.from;
+        if (f.which && f.which !== "all" && f.which !== "next") f.which = null;
+      }
+      return st;
+    }),
+  };
+}
+const Plan = z.preprocess(tidyPlan, z.object({ steps: z.array(Step) }));
 type Step = z.infer<typeof Step>;
 type Filter = z.infer<typeof Filter>;
 

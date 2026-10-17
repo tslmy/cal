@@ -45,8 +45,11 @@ function describe(err: unknown, model: string): string {
 
 export function parseJson(text: string): unknown {
   const cleaned = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").replace(/```(?:json)?/g, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
+  // A top-level array ("[{...}, {...}]") is kept whole rather than cut down to its first object.
+  const arr = cleaned.indexOf("[");
+  const array = arr >= 0 && (cleaned.indexOf("{") < 0 || arr < cleaned.indexOf("{"));
+  const start = array ? arr : cleaned.indexOf("{");
+  const end = array ? cleaned.lastIndexOf("]") : cleaned.lastIndexOf("}");
   if (start < 0 || end < start) throw new Error(cleaned ? `no JSON object in the reply: "${cleaned.slice(0, 80)}..."` : "the reply was empty");
   return JSON.parse(cleaned.slice(start, end + 1));
 }
