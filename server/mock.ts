@@ -1,6 +1,6 @@
 import type { CalendarSpec } from "../src/shared/catalog";
 import type { DesignRequest, Persona } from "../src/shared/types";
-import { mondayOf, TODAY } from "../src/shared/dates";
+import { addDays, mondayOf, TODAY } from "../src/shared/dates";
 import { mustShow } from "../src/shared/critic";
 
 // Offline stand-in for the model, used when no CRUSOE_API_KEY is set.
@@ -30,8 +30,11 @@ function hybrid(strips: number[], band: [number, number] | null): CalendarSpec {
 }
 
 // Sample personas keep their scripts; anyone else gets the script that fits their learned time scales.
+const SAMPLES = ["mina", "jordan", "sam"];
 function script(p: Persona): string | null {
-  if (["mina", "jordan", "sam"].includes(p.id)) return p.id;
+  if (SAMPLES.includes(p.id)) return p.id;
+  if (p.profile.signals.rotation) return "rotation";
+  if (p.profile.signals.overnight !== undefined) return "nights";
   const scales = (p.profile.signals.timeScales as string[] | undefined) ?? [];
   if (scales.includes("year")) return scales.includes("week") ? "sam" : "mina";
   if (scales.includes("week") || scales.includes("day") || p.profile.signals.weekendEvents === false) return "jordan";
@@ -41,7 +44,11 @@ function script(p: Persona): string | null {
 // The reason cites the learned habits that match, with their numbers (P9).
 function cite(p: Persona, re: RegExp, fallback: string): string {
   const facts = p.profile.facts.map((f) => f.replace(/ \(confidence [\d.]+\)$/, "")).filter((f) => re.test(f)).sort((a, b) => Number(/\d/.test(b)) - Number(/\d/.test(a)));
-  return facts.length ? `${facts.slice(0, 2).join(". ")}.` : fallback;
+  if (facts.length) return `${facts.slice(0, 2).join(". ")}.`;
+  // The scripted fallbacks describe the sample personas; anyone else gets their own top habits.
+  if (SAMPLES.includes(p.id)) return fallback;
+  const own = p.profile.facts.map((f) => f.replace(/ \(confidence [\d.]+\)$/, "")).filter((f) => /\d/.test(f) && !/^Adds events/.test(f));
+  return `${own.slice(0, 2).join(". ")}.`;
 }
 
 function habitDraft(p: Persona, req: DesignRequest, n: number, round: number, who = script(p)): unknown {
@@ -51,6 +58,17 @@ function habitDraft(p: Persona, req: DesignRequest, n: number, round: number, wh
   const say = (title: string, reason: string, spec: CalendarSpec) => ({ proposal: { title, reason, spec } });
 
   if (!who) return { proposal: null, why: "Not enough learned habits yet." };
+
+  if (who === "nights" || who === "rotation") {
+    const weekOf = (w: string) => leaf("WeekGrid", { weekOf: w, days: ALL, startHour: 0, endHour: 24 });
+    if (who === "nights" || types.filter((t) => t === "WeekGrid").length >= 2) {
+      if (week && week.props.startHour === 0 && week.props.endHour === 24) return { proposal: null, why: `Whole days already fit ${p.name}'s nights.` };
+      return say("Show whole days, midnight to midnight?", `${cite(p, /midnight/i, "")} A full-day grid draws each night as one block instead of cutting it off.`, one(weekOf(WEEK)));
+    }
+    const next = addDays(WEEK, 7);
+    const spec: CalendarSpec = { root: "root", elements: { root: { type: "Stack", props: { direction: "column", gap: "md" }, children: ["this", "next"] }, this: weekOf(WEEK), next: weekOf(next) } };
+    return say("Show this week and next together?", `${cite(p, /different weekdays/i, "")} Two weeks side by side show the whole rotation.`, spec);
+  }
 
   if (who === "mina") {
     if (types.includes("YearBand")) return { proposal: null, why: `The years view already matches how ${p.name} plans.` };
@@ -66,9 +84,13 @@ function habitDraft(p: Persona, req: DesignRequest, n: number, round: number, wh
     if (!week) {
       const reason = cite(p, /week view|meetings/i, "You chose the week view on 9 of your last 10 visits, and nearly all your events are 30 to 90 minute meetings.");
       const hours = n === 1 && !fix ? [work[0] + 1, work[1]] : work;
-      return say("Make the week your default view?", reason, one(leaf("WeekGrid", { weekOf: WEEK, days: ALL, startHour: hours[0], endHour: hours[1] })));
+      const grid = leaf("WeekGrid", { weekOf: WEEK, days: ALL, startHour: hours[0], endHour: hours[1] });
+      // A repair keeps longer plans in view by putting the month under the week.
+      if (fix && !SAMPLES.includes(p.id))
+        return say("Show this week by the hour, with the month below?", `${reason} The month underneath keeps your longer plans in view.`, { root: "root", elements: { root: { type: "Stack", props: { direction: "column", gap: "lg" }, children: ["week", "month"] }, week: grid, month: leaf("MonthGrid", { month: TODAY.slice(0, 7) }) } });
+      return say("Make the week your default view?", reason, one(grid));
     }
-    if (days.length > 5) {
+    if (days.length > 5 && p.profile.signals.weekendEvents !== true) {
       const reason = `${cite(p, /weekend/i, "You haven't scheduled anything on a Saturday or Sunday in 14 weeks.")} If something does land on a weekend, it will still show up.`;
       const hours = n === 1 && !fix ? [work[0], work[1] - 1] : work;
       return say("Hide weekends?", reason, one(leaf("WeekGrid", { weekOf: WEEK, days: WORK, startHour: hours[0], endHour: hours[1] })));

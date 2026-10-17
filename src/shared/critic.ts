@@ -1,6 +1,6 @@
 import { catalog, type CalendarSpec } from "./catalog";
 import type { CalEvent } from "./types";
-import { addDays, daysBetween, hourOf, isoWeek, mondayOf, TODAY, weeksInIsoYear, mondayOfIsoWeek } from "./dates";
+import { addDays, daysBetween, endHourOf, hourOf, isoWeek, mondayOf, TODAY, weeksInIsoYear, mondayOfIsoWeek } from "./dates";
 
 // Mechanical checks the designer's drafts must pass. No LLM involved, so results are repeatable.
 
@@ -82,7 +82,7 @@ export function critique(spec: unknown, events: CalEvent[], current?: CalendarSp
     const p = v.props as { startHour: number; endHour: number };
     if (p.endHour <= p.startHour) issues.push("WeekGrid endHour must be after startHour.");
     const r = rangeOf(v)!;
-    const outside = events.filter((e) => e.start.length > 10 && overlaps(e, r[0], r[1]) && (hourOf(e.start) < p.startHour || hourOf(e.end) > p.endHour));
+    const outside = events.filter((e) => e.start.length > 10 && overlaps(e, r[0], r[1]) && (hourOf(e.start) < p.startHour || endHourOf(e.start, e.end) > p.endHour));
     if (outside.length) issues.push(`WeekGrid hours ${p.startHour}-${p.endHour} cut off ${outside.length} event(s), e.g. "${outside[0].title}" at ${outside[0].start.slice(11)}.`);
   }
 

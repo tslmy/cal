@@ -66,3 +66,6 @@ export const monthId = (s: string) => `month-${s.slice(0, 7)}`;
 export const dayId = (s: string) => `day-${s.slice(0, 10)}`;
 
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// End hour on the start day: an overnight event (a night shift, 7 PM to 7 AM) runs to midnight there.
+export const endHourOf = (start: string, end: string) => (end.slice(0, 10) > start.slice(0, 10) ? 24 : hourOf(end));

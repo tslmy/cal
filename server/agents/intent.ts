@@ -116,23 +116,42 @@ function summarize(ops: Operation[]): string {
 }
 
 export function resolve(state: UserState, steps: Step[], source: "typed" | "text"): ChangeSet {
-  const ops: Operation[] = [];
-  const touched = new Set<string>();
+  // Steps run in order against a working copy, so a later line can move or cancel an event an
+  // earlier line of the same note added ("move the dog walk to Tuesday").
+  const work = new Map(state.events.map((e) => [e.id, e]));
+  const ops: (Operation | null)[] = [];
+  const at = new Map<string, number>(); // event id (or temp id of a new event) -> index of its op
   const answers: string[] = [];
-  for (const st of steps) {
+  steps.forEach((st, n) => {
     if (st.op === "query") {
-      answers.push(answerFor(state.events, st.filter));
+      answers.push(answerFor([...work.values()], st.filter));
     } else if (st.op === "create") {
       const event: EventDraft = { title: st.title, start: st.start, end: st.end < st.start ? st.start : st.end, category: st.category, precision: st.precision, source };
-      ops.push({ op: "create", event });
+      const id = `new-${n}`;
+      work.set(id, { ...event, id });
+      at.set(id, ops.push({ op: "create", event }) - 1);
     } else {
-      for (const e of match(state.events, st.filter)) {
-        if (touched.has(e.id)) continue;
-        touched.add(e.id);
-        ops.push(st.op === "delete" ? { op: "delete", id: e.id, before: e } : { op: "update", id: e.id, before: e, after: updated(e, st) });
+      for (const e of match([...work.values()], st.filter)) {
+        const i = at.get(e.id);
+        const next = st.op === "update" ? updated(e, st) : null;
+        if (next) work.set(e.id, next);
+        else work.delete(e.id);
+        if (e.id.startsWith("new-")) {
+          // Edits to an event this note adds just change (or drop) its create.
+          ops[i!] = next ? { op: "create", event: { ...next, id: undefined } } : null;
+          continue;
+        }
+        const before = state.events.find((x) => x.id === e.id)!;
+        const op: Operation = next ? { op: "update", id: e.id, before, after: next } : { op: "delete", id: e.id, before };
+        if (i === undefined) at.set(e.id, ops.push(op) - 1);
+        else ops[i] = op;
       }
     }
-  }
+  });
+  return finish(steps, ops.filter((o): o is Operation => !!o), answers, source);
+}
+
+function finish(steps: Step[], ops: Operation[], answers: string[], source: "typed" | "text"): ChangeSet {
   const missed = steps.some((s) => s.op === "update" || s.op === "delete") && !ops.some((o) => o.op !== "create");
   if (!ops.length && !answers.length) answers.push(missed ? "No matching events found." : "I couldn't find anything to add or change in that.");
   return { id: newId("cs"), summary: ops.length ? summarize(ops) : steps.some((s) => s.op === "query") ? "Your calendar" : "Nothing to change", source, ops, ...(answers.length ? { answer: answers.join(" ") } : {}) };

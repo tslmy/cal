@@ -4,7 +4,7 @@ import { defineRegistry } from "@json-render/react";
 import { catalog, type CalendarSpec } from "./shared/catalog";
 import type { CalEvent } from "./shared/types";
 import {
-  addDays, DAY_KEYS, dayId, daysBetween, hourOf, isoWeek, mondayOf, mondayOfIsoWeek, monthId, MONTHS, TODAY, weekday, weekId, weeksInIsoYear,
+  addDays, DAY_KEYS, dayId, daysBetween, endHourOf, hourOf, isoWeek, mondayOf, mondayOfIsoWeek, monthId, MONTHS, TODAY, weekday, weekId, weeksInIsoYear,
 } from "./shared/dates";
 
 // ---------- shared context: events plus who owns each animation id ----------
@@ -185,7 +185,7 @@ export const { registry } = defineRegistry(catalog, {
       const overflow = events.filter((e) => on(e, mon, sun) && hidden.includes(DAY_KEYS[weekday(day0(e))]));
       // P17: timed events outside the hour range become "before" and "after" markers on their day.
       const outside = (date: string, side: "before" | "after") =>
-        shown(DAY_KEYS[weekday(date)]) ? timed.filter((e) => day0(e) === date && (side === "before" ? hourOf(e.end) <= props.startHour : hourOf(e.start) >= props.endHour)) : [];
+        shown(DAY_KEYS[weekday(date)]) ? timed.filter((e) => day0(e) === date && (side === "before" ? endHourOf(e.start, e.end) <= props.startHour : hourOf(e.start) >= props.endHour)) : [];
       const sideRow = (side: "before" | "after") => {
         const cells = DAY_KEYS.map((_, i) => outside(addDays(mon, i), side));
         const any = cells.some((c) => c.length);
@@ -248,7 +248,7 @@ export const { registry } = defineRegistry(catalog, {
                   className="relative min-w-0 basis-0 overflow-hidden border-l border-line" style={{ ...col.style, background: i >= 5 ? "#15171C05" : undefined }}>
                   {timed.filter((e) => day0(e) === date).map((e) => {
                     const top = y(hourOf(e.start));
-                    const height = (hourOf(e.end) - hourOf(e.start)) * H;
+                    const height = (endHourOf(e.start, e.end) - hourOf(e.start)) * H;
                     const c = colorFor(e.category);
                     return (
                       <motion.div key={e.id} layout="position" initial={false} animate={{ top: top + 2, height: Math.max(height - 4, 14) }} title={describe(e)}

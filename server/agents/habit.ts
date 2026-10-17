@@ -2,7 +2,7 @@ import { z } from "zod";
 import { activity, getUser, update } from "../store";
 import { isLive, structured } from "../llm";
 import { systemFor } from "../prompts";
-import { daysBetween, TODAY, weekday } from "../../src/shared/dates";
+import { daysBetween, endHourOf, mondayOf, TODAY, weekday } from "../../src/shared/dates";
 import type { Belief, CalEvent, Interaction, InteractionKind, UserState } from "../../src/shared/types";
 
 // Habit learner (P8, E2): reads the interaction log and the events, never the UI, and keeps habit
@@ -10,6 +10,8 @@ import type { Belief, CalEvent, Interaction, InteractionKind, UserState } from "
 // Nano only rephrases them and nudges confidence a little.
 
 const ROLE = "Habit learner";
+const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const EVENT_KINDS: InteractionKind[] = ["create", "update", "delete", "import"];
 const SCALES = ["day", "week", "month", "quarter", "year"] as const;
 const REVERT = -0.15; // P10: revert is a strong negative
@@ -24,7 +26,8 @@ type Candidate = {
   statement: string;
   consistency: number; // 0..1: how cleanly the stats say it
   kinds: InteractionKind[]; // which interactions count as evidence
-  weeks?: number; // weeks of history behind it; omitted for count-based beliefs
+  weeks?: number; // weeks of history behind it, by the events' own dates; omitted for count-based beliefs
+  events?: number; // events behind it, so a big import counts even if it covers few weeks
 };
 
 const minutesOf = (e: CalEvent) =>
@@ -45,7 +48,7 @@ function fmtLength(min: number): string {
   if (d < 730) return plural(Math.round(d / 30.4), "month");
   return plural(Math.round(d / 365), "year");
 }
-const fmtHour = (h: number) => (h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`);
+const fmtHour = (h: number) => (h === 0 || h === 24 ? "midnight" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`);
 const spanWeeks = (days: string[]) => (days.length ? Math.max(1, Math.round((daysBetween(days[0], days.at(-1)!) + 1) / 7)) : 0);
 const quantile = (xs: number[], q: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))];
 
@@ -73,17 +76,18 @@ export function candidates(s: UserState): Candidate[] {
     const share = weekend / evs.length;
     out.push(share <= 0.02
       ? { key: "weekendEvents", value: false, statement: weekend ? `Only ${weekend} of ${evs.length} events fall on a weekend` : past ? `No weekend events in ${plural(past, "week")}` : `None of ${evs.length} events fall on a weekend`, consistency: 1 - share * 15, kinds: EVENT_KINDS, weeks }
-      : { key: "weekendEvents", value: true, statement: `Has weekend plans: ${weekend} of ${evs.length} events`, consistency: 0.85, kinds: EVENT_KINDS, weeks });
+      : { key: "weekendEvents", value: true, statement: `Has weekend plans: ${weekend} of ${evs.length} events`, consistency: 0.85, kinds: EVENT_KINDS, weeks, events: evs.length });
 
     if (meetings.length >= 3) {
       const short = meetings.filter((e) => minutesOf(e) >= 30 && minutesOf(e) <= 90).length / meetings.length;
-      out.push({ key: "meetingsPerWeek", value: perWeek, statement: `About ${perWeek} meetings a week${short >= 0.7 ? ", mostly 30 to 90 minutes" : ""}`, consistency: 0.6 + 0.35 * short, kinds: EVENT_KINDS, weeks: meetingWeeks });
+      out.push({ key: "meetingsPerWeek", value: perWeek, statement: `About ${perWeek} meetings a week${short >= 0.7 ? ", mostly 30 to 90 minutes" : ""}`, consistency: 0.6 + 0.35 * short, kinds: EVENT_KINDS, weeks: meetingWeeks, events: meetings.length });
     }
     if (timed.length >= 5) {
       const from = Math.floor(quantile(timed.map((e) => Number(e.start.slice(11, 13)) + Number(e.start.slice(14, 16)) / 60), 0.1));
-      const to = Math.ceil(quantile(timed.map((e) => Number(e.end.slice(11, 13)) + Number(e.end.slice(14, 16)) / 60), 0.97));
-      const inside = timed.filter((e) => Number(e.start.slice(11, 13)) >= from && Number(e.end.slice(11, 13)) <= to).length / timed.length;
-      out.push({ key: "workHours", value: `${from}-${to}`, statement: `Timed events fall between ${fmtHour(from)} and ${fmtHour(to)}`, consistency: inside, kinds: EVENT_KINDS, weeks });
+      const ends = timed.map((e) => (endHourOf(e.start, e.end) === 24 ? 24 : Number(e.end.slice(11, 13)) + Number(e.end.slice(14, 16)) / 60));
+      const to = Math.ceil(quantile(ends, 0.97));
+      const inside = timed.filter((e, i) => Number(e.start.slice(11, 13)) >= from && ends[i] <= to).length / timed.length;
+      out.push({ key: "workHours", value: `${from}-${to}`, statement: `Timed events fall between ${fmtHour(from)} and ${fmtHour(to)}`, consistency: inside, kinds: EVENT_KINDS, weeks, events: evs.length });
     }
 
     const counts = Object.fromEntries(SCALES.map((k) => [k, evs.filter((e) => scaleOf(e) === k).length]));
@@ -93,14 +97,16 @@ export function candidates(s: UserState): Candidate[] {
     if (perWeek >= 5) scales.add("week");
     const list = SCALES.filter((k) => scales.has(k));
     const shown = [...list].reverse().map((k) => `${k}s`);
-    out.push({ key: "timeScales", value: list, statement: `Plans in ${shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0]}: ${evs.filter((e) => scales.has(scaleOf(e))).length} of ${evs.length} events`, consistency: 0.9, kinds: [...EVENT_KINDS, "view_switch"], weeks });
+    out.push({ key: "timeScales", value: list, statement: `Plans in ${shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0]}: ${evs.filter((e) => scales.has(scaleOf(e))).length} of ${evs.length} events`, consistency: 0.9, kinds: [...EVENT_KINDS, "view_switch"], weeks, events: evs.length });
 
-    out.push({ key: "typicalLength", value: fmtLength(quantile(evs.map(minutesOf), 0.5)), statement: `Median event lasts ${fmtLength(quantile(evs.map(minutesOf), 0.5))}`, consistency: 0.85, kinds: EVENT_KINDS, weeks });
+    out.push({ key: "typicalLength", value: fmtLength(quantile(evs.map(minutesOf), 0.5)), statement: `Median event lasts ${fmtLength(quantile(evs.map(minutesOf), 0.5))}`, consistency: 0.85, kinds: EVENT_KINDS, weeks, events: evs.length });
 
     const ahead = daysBetween(TODAY, evs.map((e) => e.end.slice(0, 10)).sort().at(-1)!);
     const years = Math.round(ahead / 365);
-    if (ahead >= 14) out.push({ key: "horizonYears", value: years, statement: years >= 1 ? `Plans reach ${plural(years, "year")} ahead` : `Plans reach about ${plural(Math.round(ahead / 7), "week")} ahead`, consistency: 0.85, kinds: EVENT_KINDS, weeks });
+    if (ahead >= 14) out.push({ key: "horizonYears", value: years, statement: years >= 1 ? `Plans reach ${plural(years, "year")} ahead` : `Plans reach about ${plural(Math.round(ahead / 7), "week")} ahead`, consistency: 0.85, kinds: EVENT_KINDS, weeks, events: evs.length });
   }
+
+  if (evs.length >= 3) out.push(...shapeSignals(evs));
 
   const switches = s.interactions.filter((i) => i.kind === "view_switch").slice(-20);
   const views = switches.map(viewOf).filter((v): v is string => !!v);
@@ -117,6 +123,56 @@ export function candidates(s: UserState): Candidate[] {
     const n = added.filter((x) => x === top).length;
     out.push({ key: "sources", value: [...new Set(added)], statement: `Adds events mostly by ${NAMES[top]} (${n} of ${added.length})`, consistency: n / added.length, kinds: ["create", "import"] });
   }
+  return out;
+}
+
+// Habits about the shape of someone's time that the scale and hours stats miss (P4, P12, P13,
+// P17, P18 in usage-patterns.md): rough times, nights, rotations, people and routines.
+const NOT_NAMES = new Set([...WEEKDAY_NAMES, ...MONTH_NAMES, "I", "My", "Mom", "Dad", "The", "A", "An", "Call", "Lunch", "Dinner", "Breakfast", "Move", "Night", "Day", "Days"]);
+const routineOf = (title: string) => title.toLowerCase().replace(/[^a-z' ]/g, "").replace(/\s+/g, " ").trim();
+
+function shapeSignals(evs: CalEvent[]): Candidate[] {
+  const out: Candidate[] = [];
+  const n = evs.length;
+  const base = { kinds: EVENT_KINDS, weeks: spanWeeks(evs.map((e) => e.start.slice(0, 10)).sort()), events: n };
+
+  const rough = evs.filter((e) => e.precision === "approximate" || e.precision === "week" || e.precision === "span").length;
+  if (rough >= 3 && rough / n >= 0.25)
+    out.push({ ...base, key: "roughTimes", value: Math.round((rough / n) * 100), statement: `Gives rough times: ${rough} of ${n} events are "around" or "sometime"`, consistency: 0.6 + 0.35 * (rough / n) });
+
+  const overnight = evs.filter((e) => e.start.length > 10 && e.end.slice(0, 10) > e.start.slice(0, 10) && minutesOf(e) < 1440);
+  if (overnight.length >= 2) {
+    const starts = overnight.map((e) => Number(e.start.slice(11, 13)));
+    out.push({ ...base, key: "overnight", value: Math.min(...starts), statement: `${overnight.length} events run past midnight, starting around ${fmtHour(quantile(starts, 0.5))}`, consistency: 0.9 });
+  }
+
+  // A routine repeats under one title; it rotates when its weekdays differ from one week to the next.
+  const byTitle = new Map<string, CalEvent[]>();
+  for (const e of evs) byTitle.set(routineOf(e.title), [...(byTitle.get(routineOf(e.title)) ?? []), e]);
+  const routines = [...byTitle].filter(([, xs]) => xs.length >= 3).sort((a, b) => b[1].length - a[1].length);
+  if (routines.length)
+    out.push({ ...base, key: "routines", value: routines.map(([t]) => t), statement: `Repeats ${plural(routines.length, "routine")}: ${routines.slice(0, 3).map(([, xs]) => `${xs[0].title} (${xs.length} times)`).join(", ")}`, consistency: 0.85 });
+  for (const [, xs] of routines) {
+    const weeks = new Map<string, Set<number>>();
+    for (const e of xs) weeks.set(mondayOf(e.start), (weeks.get(mondayOf(e.start)) ?? new Set()).add(weekday(e.start)));
+    const patterns = new Set([...weeks.values()].map((d) => [...d].sort().join()));
+    if (weeks.size >= 2 && patterns.size >= 2) {
+      out.push({ ...base, key: "rotation", value: xs[0].title, statement: `${xs[0].title} lands on different weekdays each week (${xs.length} times over ${plural(weeks.size, "week")})`, consistency: 0.85 });
+      break;
+    }
+  }
+
+  // A person is a capitalized name in at least two different titles; a name that only ever shows up
+  // in one repeated title ("Night shift at St. Mary's") is a place, not someone they plan around.
+  const people = new Map<string, Set<string>>();
+  for (const e of evs) {
+    const words = [...e.title.matchAll(/(?<!St\. )\b([A-Z][a-z]{1,15})\b(?!\.)/g)];
+    const names = words.map((m) => m[1]).filter((w, i) => !NOT_NAMES.has(w) && (i > 0 || /'s\b/.test(e.title) || /\bwith\b/i.test(e.title)));
+    for (const p of names) people.set(p, (people.get(p) ?? new Set()).add(routineOf(e.title)));
+  }
+  const named = [...people].map(([p, t]) => [p, t.size] as const).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]);
+  if (named.length >= 2)
+    out.push({ ...base, key: "people", value: named.map(([p]) => p), statement: `Plans around ${named.length} people: ${named.slice(0, 4).map(([p, c]) => `${p} (${c})`).join(", ")}`, consistency: 0.85 });
   return out;
 }
 
@@ -192,7 +248,8 @@ function plan(s: UserState, now: number): Plan {
       const reverts = reactions.filter((r) => r.kind === "proposal_reverted").length;
       const dismisses = reactions.filter((r) => r.kind === "proposal_dismissed").length;
       const penalty = Math.max(0.5, 1 - 0.1 * reverts - 0.05 * dismisses);
-      const amount = c.weeks === undefined ? 1 - Math.exp(-relevant.length / 5) : (1 - Math.exp(-c.weeks / 4)) * Math.min(1, relevant.length / 6);
+      const span = Math.max(1 - Math.exp(-(c.weeks ?? 0) / 4), 1 - Math.exp(-(c.events ?? 0) / 6));
+      const amount = c.weeks === undefined && c.events === undefined ? 1 - Math.exp(-relevant.length / 5) : span * Math.min(1, relevant.length / 6);
       const target = Math.max(0, 0.95 * c.consistency * amount * penalty);
       if (prev && contradicts(key, prev.value, c.value)) {
         conf = Math.max(0, conf - 0.15);
@@ -203,7 +260,9 @@ function plan(s: UserState, now: number): Plan {
           notesFor.push(`Changed its mind: "${c.statement}"`);
         } else notesFor.push(`Counter-signal for "${statement}": the log now says "${c.statement}"`);
       } else {
-        conf += (target - conf) * (target > conf ? 0.6 : 0.5);
+        // A big import is many observations at once, not one: step further the more fresh evidence there is.
+        const rate = target > conf ? 1 - 0.4 ** Math.max(1, fresh.length / 3) : 0.5;
+        conf += (target - conf) * rate;
         value = c.value;
         statement = c.statement;
       }
