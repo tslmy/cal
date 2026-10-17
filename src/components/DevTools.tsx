@@ -19,7 +19,7 @@ const heading = "m-0 text-xs font-semibold uppercase tracking-wider text-faint";
 // Empties the person, then sends their requests through the chat box one by one. Weekly
 // transcripts apply each simulated week (and run the learner) after its last request; request
 // files are parsed line by line like typed sentences.
-function ReplayPerson({ user, state, progress, onReplay, onStop }: { user: string; state: ServerState; progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void }) {
+function ReplayPerson({ user, state, progress, onReplay, onStop }: { user: string; state: ServerState; progress: { at: number; of: number; stopping?: boolean } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void }) {
   const weekly = WEEKLY.includes(user);
   const file = transcriptOf(user);
   const [loading, setLoading] = useState(false);
@@ -62,7 +62,7 @@ function ReplayPerson({ user, state, progress, onReplay, onStop }: { user: strin
   return (
     <div className="flex flex-col gap-2">
       {progress ? (
-        <button type="button" onClick={onStop} className={btn}>Stop ({progress.at} of {progress.of})</button>
+        <button type="button" onClick={onStop} disabled={progress.stopping} className={btn}>{progress.stopping ? "Stopping..." : `Stop (${progress.at} of ${progress.of})`}</button>
       ) : (
         <button type="button" disabled={!has || loading} onClick={start} className={btn}>
           {loading ? "Starting..." : !has ? "Replay requests" : weekly ? `Replay ${state.name}'s last 8 weeks` : `Replay ${state.name}'s requests`}
@@ -79,13 +79,13 @@ function ReplayPerson({ user, state, progress, onReplay, onStop }: { user: strin
 
 // Types a text file into the sentence box one line at a time, as if the person sent each one.
 // Unlike Import > Text file, which reads the whole file as one previewed change.
-function ReplayRequests({ progress, onStart, onStop }: { progress: { at: number; of: number } | null; onStart: (lines: string[]) => void; onStop: () => void }) {
+function ReplayRequests({ progress, onStart, onStop }: { progress: { at: number; of: number; stopping?: boolean } | null; onStart: (lines: string[]) => void; onStop: () => void }) {
   const file = useRef<HTMLInputElement>(null);
   return (
     <section aria-label="Replay requests" className="flex flex-col gap-2">
       <h2 className={heading}>Replay requests</h2>
       {progress ? (
-        <button type="button" onClick={onStop} className={`${btn} self-start`}>Stop ({progress.at} of {progress.of})</button>
+        <button type="button" onClick={onStop} disabled={progress.stopping} className={`${btn} self-start`}>{progress.stopping ? "Stopping..." : `Stop (${progress.at} of ${progress.of})`}</button>
       ) : (
         <button type="button" onClick={() => file.current?.click()} className={`${btn} self-start`}>Choose a text file</button>
       )}
@@ -102,7 +102,7 @@ function ReplayRequests({ progress, onStart, onStop }: { progress: { at: number;
 export function DevTools({ open, onToggle, user, onUser, state, users, busy, onAsk, progress, onReplay, onStop }: {
   open: boolean; onToggle: () => void; user: string; onUser: (id: string) => void; state?: ServerState;
   users: { id: string; name: string; role: string }[]; busy: boolean; onAsk: () => void;
-  progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void;
+  progress: { at: number; of: number; stopping?: boolean } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void;
 }) {
   const reset = useAction(user, () => api(`/api/state/${user}/reset`, {}));
   const qc = useQueryClient();
