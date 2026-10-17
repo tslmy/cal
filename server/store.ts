@@ -48,10 +48,14 @@ export function getUser(id: string): UserState | undefined {
   return db.data.users[id];
 }
 
-// Mutates one person's state and saves it.
-export async function update<T>(id: string, fn: (s: UserState) => T): Promise<T> {
+// Mutates one person's state and saves it. Agents pass the state they started from (`from`), so a
+// pass that outlives a reset doesn't write its results into the fresh person; it gets undefined.
+export async function update<T>(id: string, fn: (s: UserState) => T): Promise<T>;
+export async function update<T>(id: string, fn: (s: UserState) => T, from: UserState): Promise<T | undefined>;
+export async function update<T>(id: string, fn: (s: UserState) => T, from?: UserState): Promise<T | undefined> {
   const s = db.data.users[id];
   if (!s) throw new Error(`no such user: ${id}`);
+  if (from && s !== from) return undefined;
   const out = fn(s);
   await db.write();
   return out;

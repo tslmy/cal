@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type { UserState } from "./shared/types";
 
 // Server state lives in the agent server (E13); the browser only caches it.
@@ -23,8 +24,9 @@ export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: () => api<{ id: string; name: string; role: string }[]>("/api/users") });
 }
 
-// A POST that refreshes the person's state when it lands.
-export function useAction<V = unknown, R = unknown>(user: string, run: (v: V) => Promise<R>) {
+// A POST that refreshes the person's state when it lands. Failures show as a toast unless the
+// caller reports them itself (`quiet`).
+export function useAction<V = unknown, R = unknown>(user: string, run: (v: V) => Promise<R>, { quiet = false } = {}) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: run, onSettled: () => qc.invalidateQueries({ queryKey: stateKey(user) }) });
+  return useMutation({ mutationFn: run, onError: (err) => void (quiet || toast.error(err.message)), onSettled: () => qc.invalidateQueries({ queryKey: stateKey(user) }) });
 }

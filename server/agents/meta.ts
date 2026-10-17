@@ -182,7 +182,7 @@ const levels = (bs: Belief[]) => {
 function knobs(m: MetaPrefs, g: Signals) {
   const reverts = g.novelQuickReverts + g.novelSlowReverts + g.classicReverts;
   const threshold = round2(clamp(0.7 + 0.05 * g.dismissStreak + 0.03 * reverts - 0.03 * (g.novelKept + g.classicKept), 0.6, 0.9));
-  const minGapMinutes = m.cadence === "fewer" ? 60 * Math.min(4, g.dismissStreak - 1) : m.cadence === "more" ? 0 : reverts >= 2 ? 15 : 0;
+  const minGapMinutes = m.cadence === "fewer" ? 60 * Math.max(0, Math.min(4, g.dismissStreak - 1)) : m.cadence === "more" ? 0 : reverts >= 2 ? 15 : 0;
   return { threshold, minGapMinutes };
 }
 
@@ -310,7 +310,7 @@ async function learn(userId: string, trigger?: Interaction) {
   const before = levels(s.beliefs);
   const changed = before !== levels(beliefs);
 
-  await update(userId, (st) => {
+  const wrote = await update(userId, (st) => {
     for (const b of beliefs) {
       const old = st.beliefs.find((x) => x.key === b.key);
       if (old && JSON.stringify(old.value) === JSON.stringify(b.value)) {
@@ -323,6 +323,8 @@ async function learn(userId: string, trigger?: Interaction) {
       st.beliefs = [...st.beliefs.filter((x) => x.key !== b.key), b];
     }
     const k = knobs(m, g);
+    // The person's own "how often" choice is a floor, unless they plainly want more suggestions.
+    if (m.cadence !== "more") k.minGapMinutes = Math.max(k.minGapMinutes, st.settings.minGapMinutes);
     const moved = [
       k.threshold !== st.settings.threshold && `proposal threshold ${st.settings.threshold.toFixed(2)} → ${k.threshold.toFixed(2)}`,
       k.minGapMinutes !== st.settings.minGapMinutes && `minimum gap ${st.settings.minGapMinutes} → ${k.minGapMinutes} min`,
@@ -331,8 +333,9 @@ async function learn(userId: string, trigger?: Interaction) {
       activity(st, ROLE, `Moved the ${moved.join(" and the ")} (${m.reason}).`);
       Object.assign(st.settings, k);
     }
-  });
-  if (changed) await rewrite(userId, m, beliefs.flatMap((b) => b.evidence));
+    return true;
+  }, s);
+  if (changed && wrote) await rewrite(userId, m, beliefs.flatMap((b) => b.evidence));
 }
 
 async function rewrite(userId: string, m: MetaPrefs, evidence: string[]) {
@@ -356,7 +359,7 @@ async function rewrite(userId: string, m: MetaPrefs, evidence: string[]) {
       st.prompts.push(v);
       activity(st, ROLE, result.ok ? `Rewrote the ${agent} prompt's learned section (v${version}).` : `Kept ${agent} v${prev?.version ?? 0}: the replay of v${version} failed.`, diff);
     }
-  });
+  }, s);
 }
 
 // One run at a time per person; triggers that arrive meanwhile queue behind it.

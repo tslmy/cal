@@ -81,8 +81,12 @@ export function parseIcs(text: string, source: Source = "ics"): Parsed {
     }
     recurring++;
     const it = ev.iterator();
-    for (let n = 0, next = it.next(); next && n < MAX_PER_SERIES; next = it.next(), n++) {
+    // Counts only what lands in the window, so a daily series that began years ago still imports;
+    // the window's end stops the walk.
+    for (let n = 0, next = it.next(); next && n < MAX_PER_SERIES; next = it.next()) {
       if (toHome(next, startTz).slice(0, 10) > TO) break;
+      if (toHome(next, startTz).slice(0, 10) < FROM) continue;
+      n++;
       const d = ev.getOccurrenceDetails(next);
       add(d.startDate, d.endDate, d.item.summary);
     }

@@ -62,13 +62,15 @@ const queues = new Map<string, { active: number; waiting: (() => void)[] }>();
 async function slot<T>(model: string, run: () => Promise<T>): Promise<T> {
   const q = queues.get(model) ?? { active: 0, waiting: [] };
   queues.set(model, q);
+  // A finished call hands its slot straight to the next waiter, so a newcomer can't slip in between.
   if (q.active >= IN_FLIGHT) await new Promise<void>((r) => q.waiting.push(r));
-  q.active++;
+  else q.active++;
   try {
     return await run();
   } finally {
-    q.active--;
-    q.waiting.shift()?.();
+    const next = q.waiting.shift();
+    if (next) next();
+    else q.active--;
   }
 }
 
@@ -92,6 +94,7 @@ export async function callModel(system: string, prompt: string, opts: { role?: R
       [["call", system, prompt, t], ...others.map((m) => ["call", m, system, prompt, t])])).value;
   }
   let cap = FIRST_TOKENS;
+  let ext = extras;
   for (let attempt = 0; ; attempt++) {
     try {
       const { text, finishReason } = await slot(model, () =>
@@ -102,7 +105,7 @@ export async function callModel(system: string, prompt: string, opts: { role?: R
           temperature: opts.temperature ?? 0.3,
           maxOutputTokens: cap,
           maxRetries: 0, // retried below, with longer waits that fit a per-minute limit
-          providerOptions: extras ? { crusoe: { response_format: { type: "json_object" }, chat_template_kwargs: { enable_thinking: THINKING } } } : {},
+          providerOptions: ext ? { crusoe: { response_format: { type: "json_object" }, chat_template_kwargs: { enable_thinking: THINKING } } } : {},
         }),
       );
       if (finishReason === "length") {
@@ -112,14 +115,17 @@ export async function callModel(system: string, prompt: string, opts: { role?: R
           attempt--; // not a rate-limit retry
           continue;
         }
-        if (!text.trim()) return "(ran out of tokens before answering)";
+        if (!text.trim()) throw new ModelError(`${model} ran out of tokens before answering`);
       }
       return text;
     } catch (err) {
       const e = err as { statusCode?: number; responseHeaders?: Record<string, string> };
-      if (extras && (e.statusCode === 400 || e.statusCode === 422)) {
+      if (ext && (e.statusCode === 400 || e.statusCode === 422)) {
         console.warn(`[llm] ${describe(err, model)}. Retrying without JSON mode and the thinking switch.`);
-        extras = false;
+        ext = false;
+        // Only an endpoint that rejects the options themselves loses them for good; a prompt that
+        // is too long shouldn't turn JSON mode off for the rest of the demo.
+        if (/response_format|chat_template|thinking|json/i.test(describe(err, model))) extras = false;
         continue;
       }
       // Crusoe's limit is shared and bursty (several 429s in a row, then room again), so keep

@@ -119,8 +119,8 @@ let started = 0; // the last replay id this page has run, kept outside the compo
 
 export type Replay = { id: number; lines: string[]; apply?: (i: number) => Promise<ServerState | undefined>; fresh?: boolean };
 
-export function CommandBar({ user, replay: request, onProgress, stop, children }: {
-  user: string; replay: Replay | null; onProgress: (p: { at: number; of: number } | null) => void; stop: React.RefObject<boolean>; children?: React.ReactNode;
+export function CommandBar({ user, replay: request, onProgress, stop, onStop, children }: {
+  user: string; replay: Replay | null; onProgress: (p: { at: number; of: number } | null) => void; stop: React.RefObject<boolean>; onStop: () => void; children?: React.ReactNode;
 }) {
   const [text, setText] = useState("");
   // Tagged with the user it was parsed for, so switching users drops it.
@@ -140,11 +140,11 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
   const through = (s: ServerState) => ({ through: s.interactions.length });
   const learnedThrough = useUserState(user).data?.learnedThrough ?? 0;
   const [asked, setAsked] = useState<number | null>(null); // the request behind the preview on screen
-  const [replay, setReplay] = useState<{ at: number; of: number } | null>(null);
+  const [replay, setReplay] = useState<{ at: number; of: number; stopping?: boolean } | null>(null);
   const input = useRef<HTMLInputElement>(null);
-  const parse = useAction(user, (t: string) => api<ChangeSet>(`/api/intent/${user}`, { text: t, source: "typed" }));
-  const apply = useAction(user, (c: ChangeSet) => api(`/api/changes/${user}/apply`, c));
-  const undo = useAction(user, (id: string) => api(`/api/changes/${user}/undo`, { changeSetId: id }));
+  const parse = useAction(user, (t: string) => api<ChangeSet>(`/api/intent/${user}`, { text: t, source: "typed" }), { quiet: true });
+  const apply = useAction(user, (c: ChangeSet) => api(`/api/changes/${user}/apply`, c), { quiet: true });
+  const undo = useAction(user, (id: string) => api(`/api/changes/${user}/undo`, { changeSetId: id }), { quiet: true });
 
   // "/" jumps to the sentence box from anywhere that isn't a text field.
   useEffect(() => {
@@ -277,8 +277,8 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
             className="min-h-11 min-w-0 flex-1 rounded-full border border-line-strong bg-white px-4 focus:border-ink focus:outline-none"
           />
           {replay ? (
-            <button type="button" onClick={() => (stop.current = true)} className="min-h-11 shrink-0 rounded-full border border-line-strong bg-white px-4 font-semibold">
-              Stop ({replay.at} of {replay.of})
+            <button type="button" disabled={replay.stopping} onClick={() => { onStop(); setReplay((r) => r && { ...r, stopping: true }); }} className="min-h-11 shrink-0 rounded-full border border-line-strong bg-white px-4 font-semibold disabled:opacity-60">
+              {replay.stopping ? "Stopping..." : `Stop (${replay.at} of ${replay.of})`}
             </button>
           ) : (
             <button type="submit" disabled={busy || !text.trim()} className="min-h-11 shrink-0 rounded-full bg-[#0B84FE] px-4 font-semibold text-white disabled:opacity-60">

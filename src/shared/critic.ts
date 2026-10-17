@@ -10,20 +10,30 @@ const evStart = (e: CalEvent) => e.start.slice(0, 10);
 const evEnd = (e: CalEvent) => e.end.slice(0, 10);
 const overlaps = (e: CalEvent, from: string, to: string) => evStart(e) <= to && evEnd(e) >= from;
 
+// Throws for props that pass the schema but can't render: "2026-10-01" as a month, a weekOf that
+// isn't a date, a YearBand running backwards or over decades.
+const need = (ok: boolean) => {
+  if (!ok) throw new Error("bad props");
+};
+const isDay = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v)) && !Number.isNaN(Date.parse(String(v)));
+
 // Date range a component shows. Events overlapping it count as visible.
 export function rangeOf(el: El): [string, string] | null {
   const p = el.props as Record<string, unknown>;
   switch (el.type) {
     case "MonthGrid": {
+      need(/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p.month)));
       const [y, m] = String(p.month).split("-").map(Number);
       const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
       return [`${String(p.month)}-01`, addDays(next, -1)];
     }
     case "WeekGrid": {
+      need(isDay(p.weekOf));
       const mon = mondayOf(String(p.weekOf));
       return [mon, addDays(mon, 6)];
     }
     case "NightGrid": {
+      need(isDay(p.weekOf));
       const mon = mondayOf(String(p.weekOf));
       return [mon, addDays(mon, 7)];
     }
@@ -32,6 +42,7 @@ export function rangeOf(el: El): [string, string] | null {
       return [mondayOfIsoWeek(y, 1), addDays(mondayOfIsoWeek(y, weeksInIsoYear(y)), 6)];
     }
     case "YearBand":
+      need(Number.isInteger(p.from) && Number.isInteger(p.to) && (p.to as number) >= (p.from as number) && (p.to as number) - (p.from as number) <= 10);
       return [`${p.from}-01-01`, `${p.to}-12-31`];
     default:
       return null;
@@ -132,7 +143,8 @@ export function sharedPeriods(a: CalendarSpec, b: CalendarSpec): number {
   const weeks = (s: CalendarSpec) => {
     const set = new Set<string>();
     for (const e of Object.values(s.elements)) {
-      const r = rangeOf(e);
+      let r: [string, string] | null = null;
+      try { r = rangeOf(e); } catch { /* the critic reports bad props */ }
       if (!r) continue;
       for (let d = mondayOf(r[0]); d <= r[1] && set.size < 2000; d = addDays(d, 7)) {
         const w = isoWeek(d);

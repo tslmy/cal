@@ -11,7 +11,9 @@ import { ViewSwitcher } from "./components/ViewSwitcher";
 
 // Whether the developer tools sidebar is open, remembered per browser.
 const KEY = "evolve.devtools";
-const remembered = () => { try { return localStorage.getItem(KEY) !== "closed"; } catch { return true; } };
+// Starts closed on narrow windows, where the panel would cover the sentence box.
+const wide = () => window.matchMedia("(min-width: 1024px)").matches;
+const remembered = () => { try { const v = localStorage.getItem(KEY); return v ? v === "open" : wide(); } catch { return wide(); } };
 function useDevToolsOpen() {
   const [open, setOpen] = useState(remembered);
   useEffect(() => { try { localStorage.setItem(KEY, open ? "open" : "closed"); } catch { /* private window */ } }, [open]);
@@ -26,8 +28,12 @@ export default function App() {
   const react = useAction(user, ({ id, action }: { id: string; action: "accept" | "dismiss" | "revert" }) => api(`/api/proposals/${user}/${id}/${action}`, {}));
   const [dev, setDev] = useDevToolsOpen();
   const [replay, setReplay] = useState<Replay | null>(null);
-  const [progress, setProgress] = useState<{ at: number; of: number } | null>(null);
+  const [progress, setProgress] = useState<{ at: number; of: number; stopping?: boolean } | null>(null);
   const stop = useRef(false);
+  const halt = () => {
+    stop.current = true;
+    setProgress((p) => p && { ...p, stopping: true });
+  };
 
   const pending = s?.proposals.find((p) => p.status === "suggested");
   const active = s?.proposals.filter((p) => p.status === "accepted").at(-1);
@@ -53,23 +59,23 @@ export default function App() {
               </main>
 
               <aside className="flex min-w-0 flex-[1_1_340px] flex-col gap-4">
-                {pending && <SuggestionCard proposal={pending} onAccept={() => react.mutate({ id: pending.id, action: "accept" })} onDismiss={() => react.mutate({ id: pending.id, action: "dismiss" })} />}
-                {active && <ActiveChange proposal={active} onRevert={() => react.mutate({ id: active.id, action: "revert" })} />}
+                {pending && <SuggestionCard proposal={pending} busy={react.isPending} onAccept={() => react.mutate({ id: pending.id, action: "accept" })} onDismiss={() => react.mutate({ id: pending.id, action: "dismiss" })} />}
+                {active && <ActiveChange proposal={active} busy={react.isPending} onRevert={() => react.mutate({ id: active.id, action: "revert" })} />}
                 <LearnedPanel user={user} state={s} />
                 <PromptsPanel user={user} state={s} />
               </aside>
             </div>
-
-            <div className={`fixed inset-x-0 bottom-0 z-20 border-t ${dev ? "lg:right-[380px]" : ""} border-line bg-subtle/90 px-4 pb-3 pt-2 backdrop-blur sm:px-6`}>
-              <div className="mx-auto max-w-[1400px]">
-                <CommandBar user={user} replay={replay} onProgress={setProgress} stop={stop}><ImportMenu user={user} /></CommandBar>
-              </div>
-            </div>
           </>
         )}
       </div>
-      <DevTools open={dev} onToggle={() => setDev((o) => !o)} user={user} onUser={setUser} state={s} users={users} busy={ask.isPending} onAsk={() => ask.mutate(undefined)}
-        progress={progress} onReplay={(next) => setReplay((r) => ({ id: (r?.id ?? 0) + 1, ...next }))} onStop={() => (stop.current = true)} />
+      {/* Outside the state check, so switching to someone not loaded yet doesn't drop the chat. */}
+      <div className={`fixed inset-x-0 bottom-0 z-20 border-t ${dev ? "lg:right-[380px]" : ""} border-line bg-subtle/90 px-4 pb-3 pt-2 backdrop-blur sm:px-6`}>
+        <div className="mx-auto max-w-[1400px]">
+          <CommandBar user={user} replay={replay} onProgress={setProgress} stop={stop} onStop={halt}><ImportMenu user={user} /></CommandBar>
+        </div>
+      </div>
+      <DevTools open={dev} onToggle={() => setDev((o) => !o)} user={user} onUser={setUser} state={s} users={users} busy={ask.isPending || !!s?.designing} onAsk={() => ask.mutate(undefined)}
+        progress={progress} onReplay={(next) => setReplay((r) => ({ id: (r?.id ?? 0) + 1, ...next }))} onStop={halt} />
     </div>
   );
 }

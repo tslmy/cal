@@ -31,8 +31,8 @@ export function ImportMenu({ user }: { user: string }) {
   const [reading, setReading] = useState<string | null>(null);
   const inputs = useRef<Partial<Record<Kind, HTMLInputElement | null>>>({});
   const root = useRef<HTMLDivElement>(null);
-  const apply = useAction(user, (cs: ChangeSet) => api(`/api/changes/${user}/apply`, cs));
-  const undo = useAction(user, (changeSetId: string) => api(`/api/changes/${user}/undo`, { changeSetId }));
+  const apply = useAction(user, (cs: ChangeSet) => api(`/api/changes/${user}/apply`, cs), { quiet: true });
+  const undo = useAction(user, (changeSetId: string) => api(`/api/changes/${user}/undo`, { changeSetId }), { quiet: true });
 
   useEffect(() => {
     if (!open && !preview) return;

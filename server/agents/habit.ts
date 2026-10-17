@@ -318,14 +318,14 @@ export async function learn(userId: string, label?: string, now = Date.now()): P
   const read = s.interactions.length; // what this pass covers, for the chat's "learned" marks
   const p = plan(s, now);
   if (!p.beliefs.length) {
-    await update(userId, (st) => void (st.learnedThrough = Math.max(st.learnedThrough ?? 0, read)));
+    await update(userId, (st) => void (st.learnedThrough = Math.max(st.learnedThrough ?? 0, read)), s);
     return { changes: [], crossings: [] };
   }
   const warn = isLive() ? await phrase(s, p) : null;
   const seenLog = s.interactions.length;
   const th = s.settings.threshold;
 
-  return update(userId, (st) => {
+  const out = await update(userId, (st) => {
     const prefix = label ? `${label}: ` : "";
     if (warn) activity(st, ROLE, warn);
     const crossings: string[] = [];
@@ -356,5 +356,6 @@ export async function learn(userId: string, label?: string, now = Date.now()): P
     }
     st.learnedThrough = Math.max(st.learnedThrough ?? 0, read);
     return { changes: p.changes, crossings };
-  });
+  }, s);
+  return out ?? { changes: [], crossings: [] }; // the person was started over meanwhile
 }

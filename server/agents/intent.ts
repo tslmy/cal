@@ -107,7 +107,9 @@ function titleHas(e: CalEvent, needle: string): boolean {
   const n = lc(needle).trim();
   if (!n) return true;
   const singular = n.replace(/s$/, "");
-  return t.includes(n) || t.includes(singular) || singular.split(/\s+/).every((w) => t.includes(w));
+  // Words match from their start, so "it" doesn't find "Lunch with Mom" and "shift" doesn't find "shifted".
+  const word = (w: string) => new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t);
+  return word(n) || word(singular) || singular.split(/\s+/).every(word);
 }
 
 // A timed event shorter than a day belongs to the day it starts, so "Thursday's shift" never
@@ -256,7 +258,8 @@ const REF = () => new Date(Number(TODAY.slice(0, 4)), Number(TODAY.slice(5, 7)) 
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (c: chrono.ParsedComponents) => `${c.get("year")}-${pad(c.get("month")!)}-${pad(c.get("day")!)}`;
 const hm = (c: chrono.ParsedComponents) => `${pad(c.get("hour")!)}:${pad(c.get("minute") ?? 0)}`;
-const APPROX = /\b(around|about|roughly|approximately|ish)\b|-ish\b/i;
+// Only next to a time: "about my refill" or "strict about that" is not a rough time.
+const APPROX = /\b(around|about|roughly|approximately)\s+(\d|noon|midnight)|\d\s*(am|pm)?-?ish\b|\bor so\b/i;
 const MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
 function when(text: string): When | null {
@@ -325,7 +328,7 @@ const category = (title: string) => CATEGORIES.find(([re]) => re.test(title))?.[
 
 const QUESTION_WORDS = new Set("what what's whats when when's is are do does i have has there anything any show me list how many where on my the events event planned scheduled happening going calendar".split(" "));
 const QUESTION = /^(what|what's|whats|when|when's|do i|am i|is there|anything|show|list|how many|where)\b|\?\s*$/i;
-const DELETE = /\b(cancel|delete|remove|drop|skip|clear(?: out)?|empty out|free up|scrap|call off|can't make|won't make|gave away|give away|giving away)\b/i;
+const DELETE = /\b(cancel(?:l?ed)?|delete|remove|drop(?!-off)|skip|clear(?: out)?|empty out|free up|scrap|call off|can't make|won't make|gave away|give away|giving away)\b/i;
 const DAY_WORD = /\b(mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs?(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)s?\b/gi;
 // "every night shift" and "every day off" name events, not a schedule.
 const EVERY = /\bevery\s+(day|evening|morning|night|weekday|weeknight)s?\b(?!\s+(?:shift|off)\b)|\b(?:every|each)\b(?=\s+(?:mon|tue|wed|thu|fri|sat|sun))/i;
@@ -343,7 +346,8 @@ function repeatOf(s: string): { days: DayKey[]; rest: string } | null {
   return { days: DAY_KEYS.filter((k) => days.includes(k)), rest };
 }
 // "shift" only as the opening verb, so "night shift Monday" is an event, not a move.
-const MOVE = /\b(move|reschedule|push|postpone|bump|change)\b|^shift\b/i;
+// "change" only as a verb ("change it to", "change my"), not "oil change".
+const MOVE = /\b(move[sd]?|reschedule|push|postpone|bump)\b|\bchange\s+(?:the|my|it|to)\b|^shift\b/i;
 const FILLER = /^(?:(?:please|can you|could you|i need to|i have to|i want to|i'd like to|let's|lets|need to|have to|add|schedule|book|put|create|set up|plan|i have|i've got|there's|a|an|the|my|our)\s+)+/i;
 const WIDE = () => ({ from: TODAY, to: addDays(TODAY, 365) });
 const clause = (s: string, at: number) => s.slice(at).split(/,|;| because | since | so that | as /i)[0];
@@ -363,7 +367,9 @@ function parseSentence(sentence: string, allowQuery: boolean): Step[] {
     const reason = part.match(/\bfor (?:a |an |the |my )?(.+)$/i);
     const body = (reason ? part.slice(0, reason.index) : part).slice(del[0].length);
     const w = when(body) ?? when(part);
-    const title = strip(body, w).replace(FILLER, "").replace(/^(everything|all|all events|anything)\b/i, "").trim();
+    let title = strip(body, w).replace(FILLER, "").replace(/^(everything|all|all events|anything)\b/i, "").trim();
+    // "Ava's soccer is cancelled this Thursday": the event is named before the verb.
+    if (!title && !/\b(everything|all|anything)\b/i.test(body)) title = strip(s.slice(0, del.index).split(/[,.;]/).at(-1)!.replace(/\b(is|are|was|were|got|has been|have been)\s*$/i, ""), w).replace(FILLER, "").trim();
     const steps: Step[] = [{ op: "delete", filter: { ...(w ? { from: w.from, to: w.to } : WIDE()), titleContains: title || null, which: w ? "all" : "next" } }];
     // "empty out my weekend for a business trip": the reason becomes the event that takes its place.
     if (reason && w && !title) {

@@ -11,6 +11,8 @@ import type { ChangeSet, Operation, Proposal } from "../../src/shared/types";
 // Events, views, proposals: the state every other workstream builds on.
 export default function register(app: Express) {
   app.get("/api/users", (_req, res) => res.json(listUsers()));
+  app.use(["/api/state/:user", "/api/changes/:user", "/api/design/:user", "/api/proposals/:user"], (req, res, next) =>
+    getUser(req.params.user as string) ? next() : res.status(404).json({ error: "no such user" }));
 
   app.get("/api/state/:user", (req, res) => {
     const s = getUser(req.params.user);
@@ -26,7 +28,7 @@ export default function register(app: Express) {
   // Manual view switch from the button group (P13).
   app.post("/api/state/:user/view", async (req, res) => {
     const spec = req.body?.spec as CalendarSpec;
-    if (!spec?.root) return res.status(400).json({ error: "spec is required" });
+    if (!spec?.root || !spec.elements?.[spec.root]) return res.status(400).json({ error: "spec is required" });
     const from = getUser(req.params.user)?.spec;
     await update(req.params.user, (s) => (s.spec = spec));
     await log(req.params.user, "view_switch", { from, to: spec, label: req.body?.label }, "manual");
@@ -36,7 +38,7 @@ export default function register(app: Express) {
   // Apply a previewed change set (P3, E12). The inverse is kept for one-tap undo.
   app.post("/api/changes/:user/apply", async (req, res) => {
     const cs = req.body as ChangeSet;
-    if (!cs?.ops) return res.status(400).json({ error: "ops are required" });
+    if (!Array.isArray(cs?.ops) || !cs.ops.every((o) => ["create", "update", "delete"].includes(o?.op))) return res.status(400).json({ error: "ops must be a list of create, update or delete" });
     await update(req.params.user, (s) => {
       const { events, inverse } = applyOps(s.events, cs.ops, () => newId("e"));
       s.events = events;
@@ -75,11 +77,15 @@ export default function register(app: Express) {
   // Reactions to a proposal (P10).
   app.post("/api/proposals/:user/:id/:action", async (req, res) => {
     const { user, id, action } = req.params;
-    const kind = ({ accept: "proposal_accepted", dismiss: "proposal_dismissed", revert: "proposal_reverted" } as const)[action as "accept"];
+    const KINDS = { accept: "proposal_accepted", dismiss: "proposal_dismissed", revert: "proposal_reverted" } as const;
+    const kind = Object.hasOwn(KINDS, action) ? KINDS[action as keyof typeof KINDS] : undefined;
     if (!kind) return res.status(400).json({ error: "action must be accept, dismiss or revert" });
+    // A double click must not accept twice: the second accept would make the undo target the new view.
+    const from = { accept: "suggested", dismiss: "suggested", revert: "accepted" }[action as keyof typeof KINDS];
     const p = await update(user, (s) => {
       const p = s.proposals.find((x) => x.id === id);
       if (!p) return null;
+      if (p.status !== from) return "stale" as const;
       if (action === "accept") {
         p.previous = s.spec;
         s.spec = p.spec;
@@ -93,6 +99,7 @@ export default function register(app: Express) {
       return p;
     });
     if (!p) return res.status(404).json({ error: "no such proposal" });
+    if (p === "stale") return res.json(getUser(user)); // already handled
     await log(user, kind, { proposalId: id, title: p.title, beliefKeys: p.beliefKeys, novel: p.novel, promptVersions: p.promptVersions, shownAt: p.at }, "manual");
     res.json(getUser(user));
   });
@@ -102,15 +109,18 @@ const CLASSIC = new Set(["MonthGrid", "WeekGrid"]);
 export const isNovel = (spec: CalendarSpec) => Object.values(spec.elements).some((e) => !CLASSIC.has(e.type) && e.type !== "Stack" && e.type !== "Section");
 
 // People the designer is working for right now, so the page can show it's busy.
-const designing = new Set<string>();
+// Counted, since the gate and "Ask the designer now" can overlap.
+const designing = new Map<string, number>();
 
 // Runs the designer for one person and stores the result as a pending proposal.
 export async function proposeView(userId: string): Promise<{ proposal: Proposal | null }> {
-  designing.add(userId);
+  designing.set(userId, (designing.get(userId) ?? 0) + 1);
   try {
     return await propose(userId);
   } finally {
-    designing.delete(userId);
+    const n = designing.get(userId)! - 1;
+    if (n > 0) designing.set(userId, n);
+    else designing.delete(userId);
   }
 }
 
@@ -123,11 +133,13 @@ async function propose(userId: string): Promise<{ proposal: Proposal | null }> {
     ? { ...out.proposal, status: "suggested", at: new Date().toISOString(), novel: isNovel(out.proposal.spec), promptVersions: promptVersionsUsed(s),
         beliefKeys: s.beliefs.filter((b) => b.level === "habit" && b.confidence >= s.settings.threshold).map((b) => b.key) }
     : null;
-  await update(userId, (st) => {
+  const wrote = await update(userId, (st) => {
     for (const t of out.trace) activity(st, t.role, t.text);
     st.proposals = st.proposals.filter((p) => p.status !== "suggested"); // one pending proposal at a time
     if (proposal) st.proposals.push(proposal);
-  });
+    return true;
+  }, s);
+  if (!wrote) return { proposal: null }; // started over while the designer worked
   if (proposal) await log(userId, "proposal_shown", { proposalId: proposal.id, title: proposal.title, novel: proposal.novel }, "agent");
   return { proposal };
 }
