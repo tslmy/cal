@@ -1,6 +1,7 @@
 import { catalog, type CalendarSpec } from "../src/shared/catalog";
-import { critique, mustShow, sharedPeriods } from "../src/shared/critic";
-import { daysBetween, isoWeek, mondayOf, TODAY } from "../src/shared/dates";
+import { critique, focusWeek, mustShow, sharedPeriods } from "../src/shared/critic";
+import { addDays, daysBetween, isoWeek, mondayOf, TODAY } from "../src/shared/dates";
+import { overlaps } from "../src/shared/ops";
 import type { DesignRequest, DesignResponse, Persona, TraceStep } from "../src/shared/types";
 import { mockDraft } from "./mock";
 import { MODELS } from "./models";
@@ -26,6 +27,8 @@ export const RULES = [
   "Do not propose again anything the user dismissed or undid.",
   "If the current view already fits the habits, propose nothing.",
   "Keep views small: 14 elements or fewer.",
+  "Every number in the reason must come from this prompt (the learned habits or the week-by-week counts). Mention past suggestions only if they are listed under PAST SUGGESTIONS.",
+  "Set every prop of every element; use null for nullable props you don't need.",
 ];
 
 export function systemPrompt(): string {
@@ -52,8 +55,17 @@ function userPrompt(p: Persona, req: DesignRequest, issues?: string[], previous?
   const timed = evs.filter((e) => e.start.length > 10);
   const weekend = evs.filter((e) => [5, 6].includes((new Date(e.start.slice(0, 10)).getUTCDay() + 6) % 7));
   const sample = [...mustShow(evs)].slice(0, 25).map((e) => `- ${e.title}: ${e.start} to ${e.end} [${e.category}]`);
+  // Counts per week, so a reason like "19 timed events this week" can be checked against the data.
+  const weeks = Array.from({ length: 5 }, (_, i) => addDays(mondayOf(TODAY), i * 7)).map((mon, i) => {
+    const inWeek = evs.filter((e) => overlaps(e, mon, addDays(mon, 6)));
+    return `- Week of ${mon}${i === 0 ? " (this week)" : i === 1 ? " (next week)" : ""}: ${inWeek.length} events, ${inWeek.filter((e) => e.start.length > 10).length} timed.`;
+  });
+  const focus = focusWeek();
   const lines = [
     `Today is ${TODAY} (ISO week ${isoWeek(TODAY).week}, week starts Monday ${mondayOf(TODAY)}).`,
+    focus > TODAY ? `Today is a weekend day, so this week is nearly over: a week view should show the week of ${focus}, alongside or instead of this one.` : `A week view should show the week of ${focus}.`,
+    "WEEK BY WEEK:",
+    ...weeks,
     "",
     `WHAT THE HABIT AGENT HAS LEARNED ABOUT ${p.name.toUpperCase()} (confidence ${p.profile.confidence}):`,
     ...p.profile.facts.map((f) => `- ${f}`),

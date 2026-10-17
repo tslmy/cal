@@ -5,7 +5,7 @@ import { newId } from "../store";
 import { systemFor } from "../prompts";
 import { cached } from "../cache";
 import { MODELS } from "../models";
-import { addDays, daysBetween, mondayOf, MONTHS, TODAY, weekday } from "../../src/shared/dates";
+import { addDays, DAY_KEYS, daysBetween, mondayOf, MONTHS, TODAY, weekday, type DayKey } from "../../src/shared/dates";
 import { overlaps } from "../../src/shared/ops";
 import { fmtDate, fmtWhen } from "../../src/shared/when";
 import type { CalEvent, ChangeSet, EventDraft, Operation, Precision, TraceStep, UserState } from "../../src/shared/types";
@@ -23,8 +23,9 @@ const Filter = z.object({
   category: z.string().nullish(),
   which: z.enum(["all", "next"]).nullish(),
 });
+const Repeat = z.object({ days: z.array(z.enum(DAY_KEYS)).min(1), until: day.nullish() });
 const Step = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("create"), title: z.string().min(1), start: time, end: time, category: z.string(), precision: z.enum(["exact", "approximate", "day", "week", "span"]) }),
+  z.object({ op: z.literal("create"), title: z.string().min(1), start: time, end: time, category: z.string(), precision: z.enum(["exact", "approximate", "day", "week", "span"]), repeat: Repeat.nullish() }),
   z.object({ op: z.literal("update"), filter: Filter, shiftDays: z.number().int().nullish(), timeOfDay: z.string().regex(/^\d{2}:\d{2}$/, "HH:mm").nullish(), start: time.nullish(), end: time.nullish(), title: z.string().nullish() }),
   z.object({ op: z.literal("delete"), filter: Filter }),
   z.object({ op: z.literal("query"), filter: Filter }),
@@ -35,10 +36,17 @@ type Filter = z.infer<typeof Filter>;
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const SAT = addDays(mondayOf(TODAY), 5); // "this weekend" is the current or coming Sat-Sun
+// Models are unreliable at weekday arithmetic, so the prompt spells out the next two weeks.
+const DATES = Array.from({ length: 15 }, (_, i) => addDays(TODAY, i))
+  .map((d, i) => `${WEEKDAYS[weekday(d)].slice(0, 3)} ${d}${i === 0 ? " (today)" : ""}`)
+  .join(", ");
+// A repeating event without an end date is filled in this far ahead.
+const REPEAT_WEEKS = 12;
 
 const CORE = `You turn what a person types or pastes into calendar operations. Today is ${WEEKDAYS[weekday(TODAY)]} ${TODAY}.
+The next two weeks: ${DATES}.
 Reply with JSON only: {"steps": [...]}. Each step is one of:
-- {"op":"create","title","start","end","category","precision"}
+- {"op":"create","title","start","end","category","precision","repeat"?}
 - {"op":"update","filter",<"shiftDays" | "timeOfDay":"HH:mm" (keeps the date) | "start"/"end" | "title">}
 - {"op":"delete","filter"}
 - {"op":"query","filter"} for questions such as "what's on Friday?"
@@ -46,10 +54,12 @@ A filter is {"from":"YYYY-MM-DD","to":"YYYY-MM-DD","titleContains"?,"category"?,
 Rules:
 1. Never invent event ids; describe what to change with a filter. Use "which":"next" when the person means one event ("move my dentist").
 2. Keep vagueness (precision): "around noon" -> "approximate" with start YYYY-MM-DDT12:00; a time given -> "exact"; a date without time -> "day" (start = end = date); "sometime next week" -> "week" spanning Mon-Sun; "sometime in May", "year 2 to year 4" (company year 1 is ${TODAY.slice(0, 4)}) -> "span" over the whole period. All-day events have date-only start and end (end inclusive).
-3. "This weekend" or "my weekend" is ${SAT} to ${addDays(SAT, 1)}. "Next week" as a move target means shiftDays 7.
+3. Take every date from the list of the next two weeks above; never work out a weekday yourself. A bare weekday ("Monday", "on Thursday", "this Friday") is its first date after today in that list; "next <weekday>" is the one in the week starting ${addDays(mondayOf(TODAY), 7)}. "This weekend" or "my weekend" is ${SAT} to ${addDays(SAT, 1)}. "Next week" as a move target means shiftDays 7.
 4. Bulk wording ("empty out my weekend", "cancel everything Friday") is a delete with a date filter and no titleContains.
 5. A note or email can imply several operations: emit every delete, move and add it implies, e.g. "empty out my weekend for a business trip" is a delete of everything that weekend plus a create of an all-day "Business trip" spanning it.
-6. Timed events without an end last one hour. Pick a short category (Meetings, Health, Social, Travel, Personal, Work) or reuse one from the person's events.`;
+6. Timed events without an end last one hour, approximate ones too: end is always after start. Overnight events end the next day ("7pm to 7am" Monday ends Tuesday 07:00). Pick a short category (Meetings, Health, Social, Travel, Personal, Work) or reuse one from the person's events.
+7. Repeating events ("every Tue and Thu", "Saturdays", "every evening", "weekly on Friday") are one create for the first occurrence with "repeat":{"days":["tue","thu"],"until":"YYYY-MM-DD" or null}. Every day is all seven days; weekdays are mon to fri. Code fills in the occurrences.
+8. Only change events the text asks to change. Context or remarks about the future ("next week the rotation flips", "I'm on nights now") delete and move nothing; add only events they spell out. Giving away, swapping or getting cover for one shift deletes just that day's shift: a filter with from = to = that date, titleContains, "which":"next".`;
 
 // ---------- resolving steps to operations ----------
 
@@ -62,9 +72,14 @@ function titleHas(e: CalEvent, needle: string): boolean {
   return t.includes(n) || t.includes(singular) || singular.split(/\s+/).every((w) => t.includes(w));
 }
 
+// A timed event shorter than a day belongs to the day it starts, so "Thursday's shift" never
+// picks up Wednesday's overnight shift that ends Thursday morning.
+const onDays = (e: CalEvent, from: string, to: string) =>
+  e.start.length > 10 && minutesBetween(e.start, e.end) < 1440 ? e.start.slice(0, 10) >= from && e.start.slice(0, 10) <= to : overlaps(e, from, to);
+
 function match(events: CalEvent[], f: Filter): CalEvent[] {
   const found = events
-    .filter((e) => overlaps(e, f.from, f.to) && (!f.category || lc(e.category) === lc(f.category)))
+    .filter((e) => onDays(e, f.from, f.to) && (!f.category || lc(e.category) === lc(f.category)))
     // A bare date range ("empty out my weekend") leaves alone long plans that merely span it.
     .filter((e) => (f.titleContains ? titleHas(e, f.titleContains) : !(e.start.slice(0, 10) < f.from && e.end.slice(0, 10) > f.to)))
     .sort((a, b) => a.start.localeCompare(b.start));
@@ -110,9 +125,33 @@ function summarize(ops: Operation[]): string {
   const by = (k: Operation["op"]) => ops.filter((o) => o.op === k);
   const name = (o: Operation) => (o.op === "create" ? o.event.title : o.before.title);
   const part = (verb: string, list: Operation[]) =>
-    list.length === 0 ? [] : list.length === 1 ? [`${verb} "${name(list[0])}"`] : [`${verb} ${list.length} events`];
+    list.length === 0 ? [] : new Set(list.map(name)).size === 1 ? [`${verb} "${name(list[0])}"${list.length > 1 ? ` (${list.length} times)` : ""}`] : [`${verb} ${list.length} events`];
   const s = [...part("remove", by("delete")), ...part("move", by("update")), ...part("add", by("create"))].join(", ");
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Timed events always end after they start: an end earlier on the same day is overnight, and a
+// missing or zero length becomes one hour.
+function span(start: string, end: string): Pick<CalEvent, "start" | "end"> {
+  if (start.length <= 10) return { start, end: end.slice(0, 10) < start ? start : end.slice(0, 10) };
+  let e = end.length > 10 ? end : `${end}${start.slice(10)}`;
+  if (e < start && e.slice(0, 10) === start.slice(0, 10)) e = `${addDays(e.slice(0, 10), 1)}${e.slice(10)}`;
+  return { start, end: e <= start ? addMinutes(start, 60) : e };
+}
+
+// A repeating create becomes one event per matching day from its start, up to `until` or REPEAT_WEEKS.
+function occurrences(first: EventDraft, repeat: z.infer<typeof Repeat> | null | undefined): EventDraft[] {
+  if (!repeat) return [first];
+  const d0 = first.start.slice(0, 10);
+  const last = repeat.until && repeat.until >= d0 ? repeat.until : addDays(d0, REPEAT_WEEKS * 7 - 1);
+  const len = daysBetween(d0, first.end.slice(0, 10));
+  const recurrence = `FREQ=WEEKLY;BYDAY=${repeat.days.map((x) => x.slice(0, 2).toUpperCase()).join(",")}${repeat.until ? `;UNTIL=${repeat.until.replace(/-/g, "")}` : ""}`;
+  const out: EventDraft[] = [];
+  for (let d = d0; d <= last; d = addDays(d, 1)) {
+    if (!repeat.days.includes(DAY_KEYS[weekday(d)])) continue;
+    out.push({ ...first, start: d + first.start.slice(10), end: addDays(d, len) + first.end.slice(10), recurrence });
+  }
+  return out.length ? out : [first];
 }
 
 export function resolve(state: UserState, steps: Step[], source: "typed" | "text"): ChangeSet {
@@ -126,10 +165,12 @@ export function resolve(state: UserState, steps: Step[], source: "typed" | "text
     if (st.op === "query") {
       answers.push(answerFor([...work.values()], st.filter));
     } else if (st.op === "create") {
-      const event: EventDraft = { title: st.title, start: st.start, end: st.end < st.start ? st.start : st.end, category: st.category, precision: st.precision, source };
-      const id = `new-${n}`;
-      work.set(id, { ...event, id });
-      at.set(id, ops.push({ op: "create", event }) - 1);
+      const first: EventDraft = { title: st.title, ...span(st.start, st.end), category: st.category, precision: st.precision, source };
+      occurrences(first, st.repeat).forEach((event, k) => {
+        const id = `new-${n}-${k}`;
+        work.set(id, { ...event, id });
+        at.set(id, ops.push({ op: "create", event }) - 1);
+      });
     } else {
       for (const e of match([...work.values()], st.filter)) {
         const i = at.get(e.id);
@@ -188,7 +229,8 @@ function when(text: string): When | null {
     const last = new Date(Date.UTC(year, idx + 1, 0)).getUTCDate();
     return { from, to: `${year}-${pad(idx + 1)}-${pad(last)}`, precision: "span", text: [m[0]] };
   }
-  const results = chrono.parse(text, REF(), { forwardDate: true });
+  // A bare "night" or "morning" is part of a title ("night shift"), not a time.
+  const results = chrono.parse(text, REF(), { forwardDate: true }).filter((r) => !/^(night|morning|evening|afternoon)$/i.test(r.text));
   if (!results.length) return null;
   const dated = results.find((r) => r.start.isCertain("day") || r.start.isCertain("weekday"));
   const timed = results.find((r) => r.start.isCertain("hour"));
@@ -210,7 +252,7 @@ function strip(text: string, w: When | null): string {
     .replace(/'s\b/g, "")
     .replace(/^[\s,;:-]+|[\s.!?,;:]+$/g, "")
     .replace(/\s+/g, " ")
-    .replace(/(\s(on|at|in|for|by|from|to|about|some ?time|the|my))+\s*$/i, "")
+    .replace(/(\s(on|at|in|for|by|from|to|about|some ?time|the|my|and))+\s*$/i, "")
     .trim();
 }
 
@@ -225,8 +267,25 @@ const category = (title: string) => CATEGORIES.find(([re]) => re.test(title))?.[
 
 const QUESTION_WORDS = new Set("what what's whats when when's is are do does i have has there anything any show me list how many where on my the events event planned scheduled happening going calendar".split(" "));
 const QUESTION = /^(what|what's|whats|when|when's|do i|am i|is there|anything|show|list|how many|where)\b|\?\s*$/i;
-const DELETE = /\b(cancel|delete|remove|drop|skip|clear(?: out)?|empty out|free up|scrap|call off|can't make|won't make)\b/i;
-const MOVE = /\b(move|reschedule|push|shift|postpone|bump|change)\b/i;
+const DELETE = /\b(cancel|delete|remove|drop|skip|clear(?: out)?|empty out|free up|scrap|call off|can't make|won't make|gave away|give away|giving away)\b/i;
+const DAY_WORD = /\b(mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs?(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)s?\b/gi;
+// "every night shift" and "every day off" name events, not a schedule.
+const EVERY = /\bevery\s+(day|evening|morning|night|weekday|weeknight)s?\b(?!\s+(?:shift|off)\b)|\b(?:every|each)\b(?=\s+(?:mon|tue|wed|thu|fri|sat|sun))/i;
+const PLURAL_DAY = /\b(mon|tues|wednes|thurs|fri|satur|sun)days\b/i;
+
+// "every Tue/Thu", "Saturdays", "every evening": the days a sentence repeats on, if any.
+function repeatOf(s: string): { days: DayKey[]; rest: string } | null {
+  const every = s.match(EVERY);
+  if (!every && !PLURAL_DAY.test(s)) return null;
+  const unit = every?.[1] ? lc(every[1]) : null;
+  const named = [...s.matchAll(DAY_WORD)].map((m) => DAY_KEYS.find((k) => lc(m[1]).startsWith(k))!).filter(Boolean);
+  const days = unit === "weekday" || unit === "weeknight" ? DAY_KEYS.slice(0, 5) : unit ? [...DAY_KEYS] : [...new Set(named)];
+  if (!days.length) return null;
+  const rest = s.replace(EVERY, ({ morning: " at 8am", evening: " at 7pm", night: " at 9pm" } as Record<string, string>)[unit ?? ""] ?? " ").replace(DAY_WORD, " ").replace(/\s+(?:and|&|\/|,)\s+/g, " ").replace(/\s+/g, " ");
+  return { days: DAY_KEYS.filter((k) => days.includes(k)), rest };
+}
+// "shift" only as the opening verb, so "night shift Monday" is an event, not a move.
+const MOVE = /\b(move|reschedule|push|postpone|bump|change)\b|^shift\b/i;
 const FILLER = /^(?:(?:please|can you|could you|i need to|i have to|i want to|i'd like to|let's|lets|need to|have to|add|schedule|book|put|create|set up|plan|i have|i've got|there's|a|an|the|my|our)\s+)+/i;
 const WIDE = () => ({ from: TODAY, to: addDays(TODAY, 365) });
 const clause = (s: string, at: number) => s.slice(at).split(/,|;| because | since | so that | as /i)[0];
@@ -275,12 +334,14 @@ function parseSentence(sentence: string, allowQuery: boolean): Step[] {
     const timeOnly = !!tw.start && !chrono.parse(target, REF()).some((r) => r.start.isCertain("day") || r.start.isCertain("weekday"));
     return [timeOnly ? { op: "update", filter, timeOfDay: tw.start!.slice(11) } : { op: "update", filter, start: tw.start ?? tw.from }];
   }
-  const w = when(s);
+  const rep = repeatOf(s);
+  const text = rep?.rest ?? s;
+  const w = when(text) ?? (rep ? { from: TODAY, to: TODAY, precision: "day" as const, text: [] } : null);
   if (!w) return [];
-  const title = cap(strip(s, w).replace(FILLER, "")).trim();
+  const title = cap(strip(text, w).replace(FILLER, "")).trim();
   if (!title) return [];
   const start = w.start ?? w.from;
-  return [{ op: "create", title, start, end: w.end ?? w.to, category: category(title), precision: w.precision }];
+  return [{ op: "create", title, start, end: w.end ?? w.to, category: category(title), precision: w.precision, repeat: rep && { days: rep.days, until: null } }];
 }
 
 export function parseOffline(text: string, source: "typed" | "text"): Step[] {
@@ -301,9 +362,11 @@ export async function parseIntent(state: UserState, text: string, source: "typed
   if (isLive()) {
     try {
       const prompt = `${source === "text" ? "Pasted text" : "Typed sentence"}:\n${text}\n\nTheir events near today (title | start | end | category):\n${eventsForPrompt(state)}`;
-      // The plan holds filters, not event ids, so the same words replay correctly against today's events.
-      const out = await cached([MODELS.intent, source, text.trim()], async () =>
-        (await structured(Plan, systemFor(CORE, state, "intent"), prompt, { role: "intent", temperature: 0.1 })).steps);
+      const system = systemFor(CORE, state, "intent");
+      // The plan holds filters, not event ids, so the same words replay correctly against today's
+      // events. A changed system prompt (new rules, or a meta-learner rewrite) misses the cache.
+      const out = await cached([MODELS.intent, source, text.trim(), system], async () =>
+        (await structured(Plan, system, prompt, { role: "intent", temperature: 0.1 })).steps);
       steps = out.value;
       if (out.hit) trace.push({ role: "Intent", text: "Reused the cached plan for this text." });
     } catch (err) {

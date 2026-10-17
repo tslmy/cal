@@ -1,6 +1,6 @@
 import { catalog, type CalendarSpec } from "./catalog";
 import type { CalEvent } from "./types";
-import { addDays, daysBetween, endHourOf, hourOf, isoWeek, mondayOf, TODAY, weeksInIsoYear, mondayOfIsoWeek } from "./dates";
+import { addDays, daysBetween, endHourOf, hourOf, isoWeek, mondayOf, TODAY, weekday, weeksInIsoYear, mondayOfIsoWeek } from "./dates";
 
 // Mechanical checks the designer's drafts must pass. No LLM involved, so results are repeatable.
 
@@ -34,16 +34,37 @@ export function rangeOf(el: El): [string, string] | null {
   }
 }
 
-// Events the user must always be able to see: everything this week, and every plan of a week or longer still ahead.
+// The week a view should be about: this one, or on a weekend, the one starting Monday.
+export const focusWeek = () => (weekday(TODAY) >= 5 ? addDays(mondayOf(TODAY), 7) : mondayOf(TODAY));
+
+// Events the user must always be able to see: the rest of this week, and every plan of a week or
+// longer still ahead.
 export function mustShow(events: CalEvent[]): CalEvent[] {
-  const mon = mondayOf(TODAY);
-  const sun = addDays(mon, 6);
-  return events.filter((e) => overlaps(e, mon, sun) || (daysBetween(evStart(e), evEnd(e)) >= 6 && evEnd(e) >= TODAY));
+  const sun = addDays(mondayOf(TODAY), 6);
+  return events.filter((e) => overlaps(e, TODAY, sun) || (daysBetween(evStart(e), evEnd(e)) >= 6 && evEnd(e) >= TODAY));
+}
+
+// Props the catalog marks nullable, which drafts often leave out instead of setting to null.
+const NULLABLE: Record<string, string[]> = { Stack: ["gap"], Section: ["title", "note"], WeekStrip: ["label"] };
+
+// Fixes the slips that would fail the schema without changing what the draft means: missing
+// nullable props or children, and day names written as "Mon" or "monday".
+function tidy(spec: unknown): unknown {
+  const s = spec as CalendarSpec | null;
+  if (!s || typeof s !== "object" || !s.elements || typeof s.elements !== "object") return spec;
+  const elements = Object.fromEntries(Object.entries(s.elements).map(([k, el]) => {
+    if (!el || typeof el !== "object") return [k, el];
+    const props: Record<string, unknown> = { ...(el.props ?? {}) };
+    for (const n of NULLABLE[el.type] ?? []) if (props[n] === undefined) props[n] = null;
+    if (Array.isArray(props.days)) props.days = props.days.map((d) => (typeof d === "string" ? d.slice(0, 3).toLowerCase() : d));
+    return [k, { ...el, props, children: el.children ?? [] }];
+  }));
+  return { ...s, elements };
 }
 
 export function critique(spec: unknown, events: CalEvent[], current?: CalendarSpec): { ok: boolean; issues: string[]; spec?: CalendarSpec } {
   const issues: string[] = [];
-  const parsed = catalog.validate(spec);
+  const parsed = catalog.validate(tidy(spec));
   if (!parsed.success) {
     const msg = String((parsed as { error?: { message?: string } }).error?.message ?? "invalid spec");
     return { ok: false, issues: [`Spec does not match the catalog: ${msg.replace(/\s+/g, " ").slice(0, 400)}`] };
@@ -86,9 +107,11 @@ export function critique(spec: unknown, events: CalEvent[], current?: CalendarSp
     if (outside.length) issues.push(`WeekGrid hours ${p.startHour}-${p.endHour} cut off ${outside.length} event(s), e.g. "${outside[0].title}" at ${outside[0].start.slice(11)}.`);
   }
 
+  // On a weekend, a view of the coming week is fine too.
   const wk = isoWeek(TODAY);
-  if (views.length && !views.some((v) => { const r = rangeOf(v)!; return r[0] <= TODAY && r[1] >= TODAY; }))
-    issues.push(`No view includes today (${TODAY}, week ${wk.week}).`);
+  const anchor = focusWeek();
+  if (views.length && !views.some((v) => { const r = rangeOf(v)!; return (r[0] <= TODAY && r[1] >= TODAY) || (r[0] <= anchor && r[1] >= anchor); }))
+    issues.push(`No view includes today (${TODAY}, week ${wk.week})${anchor > TODAY ? ` or the coming week (${anchor})` : ""}.`);
 
   if (current && JSON.stringify(normalize(s)) === JSON.stringify(normalize(current))) issues.push("The proposal is the same as the current view.");
 
