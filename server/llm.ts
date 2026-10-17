@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { z } from "zod";
 import { MODELS, resolveModels } from "./models";
+import { cached } from "./cache";
 
 // Shared model access for every agent: Crusoe's OpenAI-compatible endpoint, a per-model queue
 // under the rate limit, backoff on 429/503, and Zod-validated JSON with retries (E10, E14).
@@ -74,10 +75,13 @@ async function slot<T>(model: string, run: () => Promise<T>): Promise<T> {
 export type Role = keyof typeof MODELS;
 
 // One raw call. Throws ModelError for API problems.
-export async function callModel(system: string, prompt: string, opts: { role?: Role; model?: string; temperature?: number } = {}): Promise<string> {
+// `cache: true` replays an earlier answer to the exact same call from the replay cache, so a
+// rehearsed demo doesn't wait on (or pay for) the same inference twice.
+export async function callModel(system: string, prompt: string, opts: { role?: Role; model?: string; temperature?: number; cache?: boolean } = {}): Promise<string> {
   // Every agent, not just the designer, needs the ids checked against what the endpoint serves.
   await checkModels();
   const model = opts.model ?? MODELS[opts.role ?? "designer"];
+  if (opts.cache) return (await cached(["call", model, system, prompt, opts.temperature ?? 0.3], () => callModel(system, prompt, { ...opts, model, cache: false }))).value;
   let cap = FIRST_TOKENS;
   for (let attempt = 0; ; attempt++) {
     try {

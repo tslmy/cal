@@ -20,7 +20,7 @@ State is saved in `data/evolve.json`. To start everyone fresh, delete that file,
 2. Type `lunch with Ana Thursday around noon`, check the fields, and press Enter. The time is stored as approximate and drawn with a dashed edge.
 3. Type `dentist tomorrow 10am`, then `empty out my weekend for a business trip`. The preview lists what will be removed and added. Apply it, then use **Undo** on the toast.
 4. **Import → Calendar file**: `samples/team-offsite.ics`. Import it again: nothing new is added. **Import → Text file**: `samples/weekend-trip.txt` produces moves and removals, not just additions.
-5. In the developer tools under "Scrub time forward", choose Sam and press **Replay**. Eight simulated weeks feed the log, beliefs grow, one crosses 0.70, and a suggestion appears that cites the habit with its number.
+5. In the developer tools under "Scrub time forward", choose Sam and press **Replay**. The person starts over, then eight simulated weeks of requests arrive in the chat box and feed the log, beliefs grow, one crosses 0.70, and a suggestion appears that cites the habit with its number.
 6. Press **Try it** and the view morphs. Press **Undo** and it morphs back. Ask the designer again, try the second invented view, and undo it too.
 7. The meta-learner lowers novelty appetite, rewrites the designer's learned section (the diff shows in Agent activity in the developer tools, and every version is listed under "What each agent is told"), and the next suggestion is a plain month view.
 

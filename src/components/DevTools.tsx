@@ -1,5 +1,8 @@
 import { useRef, useState } from "react";
-import { api, useAction, type ServerState } from "../api";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { api, stateKey, useAction, type ServerState } from "../api";
+import type { Replay } from "./CommandBar";
 import { ActivityPanel } from "./ActivityPanel";
 
 // Demo-only controls, docked like a browser's developer tools: who we're acting as, time scrubbing
@@ -9,12 +12,38 @@ const REPLAYS = [["jordan", "Jordan"], ["mina", "Mina"], ["sam", "Sam"]] as cons
 const btn = "min-h-10 rounded-lg border border-[#3A3F48] px-3 text-sm text-white hover:bg-[#262A31] disabled:opacity-50";
 const heading = "m-0 text-xs font-semibold uppercase tracking-wider text-faint";
 
-function Scrub({ user, state }: { user: string; state: ServerState }) {
+// Starts this person over, then sends a sample person's last weeks through the chat box as
+// requests, applying each simulated week (and running the learner) after its last request.
+function Scrub({ user, state, progress, onReplay }: { user: string; state: ServerState; progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void }) {
   const [who, setWho] = useState<(typeof REPLAYS)[number][0]>("jordan");
-  const replay = useAction(user, () => api(`/api/learning/${user}/replay`, { persona: who, weeks: 8 }));
-  const last = state.activity.findLast((a) => a.role === "Replay");
-  const busy = replay.isPending || (!!last && !last.text.startsWith("Done"));
+  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
   const name = REPLAYS.find(([id]) => id === who)![1];
+  const start = async () => {
+    setLoading(true);
+    try {
+      const { weeks } = await api<{ weeks: string[][] }>(`/api/learning/replay-plan/${who}?weeks=8`);
+      await api(`/api/state/${user}/reset`, {});
+      await qc.invalidateQueries({ queryKey: stateKey(user) });
+      const lines = weeks.flat();
+      const lastOf = weeks.map((_, k) => weeks.slice(0, k + 1).flat().length - 1);
+      let done = 0; // weeks applied so far
+      const apply = async (i: number) => {
+        // Applies every week whose last request has now been sent (empty weeks ride along).
+        while (done < weeks.length && (lastOf[done] <= i || i === lines.length - 1)) {
+          await api(`/api/learning/${user}/replay`, { persona: who, weeks: weeks.length, week: done });
+          done++;
+          await qc.invalidateQueries({ queryKey: stateKey(user) });
+        }
+      };
+      onReplay({ lines, apply, fresh: true });
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const busy = loading || !!progress;
   return (
     <section aria-label="Scrub time forward" className="flex flex-col gap-2">
       <h2 className={heading}>Scrub time forward</h2>
@@ -23,11 +52,11 @@ function Scrub({ user, state }: { user: string; state: ServerState }) {
           className="min-h-10 rounded-lg border border-[#3A3F48] bg-ink px-2 text-sm text-white">
           {REPLAYS.map(([id, n]) => <option key={id} value={id}>{n}</option>)}
         </select>
-        <button type="button" disabled={busy} onClick={() => replay.mutate(undefined)} className={`${btn} flex-1`}>
+        <button type="button" disabled={busy} onClick={start} className={`${btn} flex-1`}>
           {busy ? "Replaying..." : `Replay ${name}'s last 8 weeks`}
         </button>
       </div>
-      <p className="m-0 text-xs text-faint">Feeds {name}'s events and visits into {state.name}'s log, one simulated week at a time.</p>
+      <p className="m-0 text-xs text-faint">Starts {state.name} over, then sends {name}'s requests week by week while the calendar and what I've learned grow.</p>
     </section>
   );
 }
@@ -57,7 +86,7 @@ function ReplayRequests({ progress, onStart, onStop }: { progress: { at: number;
 export function DevTools({ open, onToggle, user, onUser, state, users, busy, onAsk, progress, onReplay, onStop }: {
   open: boolean; onToggle: () => void; user: string; onUser: (id: string) => void; state?: ServerState;
   users: { id: string; name: string; role: string }[]; busy: boolean; onAsk: () => void;
-  progress: { at: number; of: number } | null; onReplay: (lines: string[]) => void; onStop: () => void;
+  progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void;
 }) {
   const reset = useAction(user, () => api(`/api/state/${user}/reset`, {}));
   if (!open)
@@ -85,9 +114,9 @@ export function DevTools({ open, onToggle, user, onUser, state, users, busy, onA
         </div>
       </section>
 
-      <ReplayRequests progress={progress} onStart={onReplay} onStop={onStop} />
+      <ReplayRequests progress={progress} onStart={(lines) => onReplay({ lines })} onStop={onStop} />
 
-      {state && <Scrub user={user} state={state} />}
+      {state && <Scrub user={user} state={state} progress={progress} onReplay={onReplay} />}
       {state && <ActivityPanel steps={state.activity} mode={state.mode} busy={busy} onAsk={onAsk} />}
     </aside>
   );

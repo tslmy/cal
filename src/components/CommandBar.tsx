@@ -96,7 +96,9 @@ function ChatLog({ lines, onClear }: { lines: { id: number; text: string }[]; on
   );
 }
 
-export type Replay = { id: number; lines: string[] };
+// `apply`, when given, replaces parsing: the time scrub sends its own requests and applies each
+// simulated week itself once its last line is sent.
+export type Replay = { id: number; lines: string[]; apply?: (i: number) => Promise<void>; fresh?: boolean };
 
 export function CommandBar({ user, replay: request, onProgress, stop, children }: {
   user: string; replay: Replay | null; onProgress: (p: { at: number; of: number } | null) => void; stop: React.RefObject<boolean>; children?: React.ReactNode;
@@ -148,15 +150,16 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
     });
 
   // Types each line into the box, sends it as a bubble and applies what it parses to, unreviewed.
-  const play = async (lines: string[]) => {
+  const play = async ({ lines, apply: applyLine, fresh }: Replay) => {
     stop.current = false;
+    if (fresh) setSent((all) => all.filter((l) => l.user !== user)); // the person was started over
     setCs(null);
     let failed = 0;
     for (const [i, line] of lines.entries()) {
       if (stop.current) break;
       setReplay({ at: i + 1, of: lines.length });
       onProgress({ at: i + 1, of: lines.length });
-      const step = Math.min(18, 900 / line.length);
+      const step = Math.min(applyLine ? 8 : 18, (applyLine ? 400 : 900) / line.length);
       for (let n = 1; n <= line.length && !stop.current; n++) {
         setText(line.slice(0, n));
         await wait(step);
@@ -166,8 +169,11 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
       setText("");
       say(line);
       try {
-        const c = await parse.mutateAsync(line);
-        if (c.ops.length) await apply.mutateAsync(c);
+        if (applyLine) await applyLine(i);
+        else {
+          const c = await parse.mutateAsync(line);
+          if (c.ops.length) await apply.mutateAsync(c);
+        }
       } catch {
         failed++;
       }
@@ -180,7 +186,7 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
   };
 
   useEffect(() => {
-    if (request) void play(request.lines);
+    if (request) void play(request);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per replay request
   }, [request?.id]);
 

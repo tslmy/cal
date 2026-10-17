@@ -3,7 +3,7 @@ import type { UserState } from "./shared/types";
 
 // Server state lives in the agent server (E13); the browser only caches it.
 
-export type ServerState = UserState & { mode: "live" | "mock" };
+export type ServerState = UserState & { mode: "live" | "mock"; designing?: boolean };
 
 export async function api<T = ServerState>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, body === undefined ? undefined : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

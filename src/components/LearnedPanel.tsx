@@ -26,7 +26,7 @@ function BeliefRow({ b, threshold, onDelete }: { b: Belief; threshold: number; o
 
 // "What I've learned" (P11, P12): beliefs with their confidence against the proposal threshold,
 // how the person likes to be adapted, and the knobs for how often suggestions come.
-export function LearnedPanel({ user, state }: { user: string; state: UserState }) {
+export function LearnedPanel({ user, state }: { user: string; state: UserState & { designing?: boolean } }) {
   const forget = useAction(user, (key: string) => api(`/api/learning/${user}/beliefs/${encodeURIComponent(key)}/delete`, {}));
   const settings = useAction(user, (body: Partial<UserState["settings"]>) => api(`/api/learning/${user}/settings`, body));
 
@@ -63,6 +63,12 @@ export function LearnedPanel({ user, state }: { user: string; state: UserState }
             <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-[left] ${proposalsOn ? "left-[18px]" : "left-0.5"}`} />
           </button>
           Suggestions
+          {state.designing && (
+            <span role="status" className="flex items-center gap-1.5 text-xs text-muted">
+              <span aria-hidden className="size-3.5 animate-spin rounded-full border-2 border-line-strong border-t-accent" />
+              Designing...
+            </span>
+          )}
         </label>
         <label className="flex min-w-0 flex-1 items-center gap-2">
           <span className="sr-only">How often</span>

@@ -69,7 +69,7 @@ export default function App() {
         )}
       </div>
       <DevTools open={dev} onToggle={() => setDev((o) => !o)} user={user} onUser={setUser} state={s} users={users} busy={ask.isPending} onAsk={() => ask.mutate(undefined)}
-        progress={progress} onReplay={(lines) => setReplay((r) => ({ id: (r?.id ?? 0) + 1, lines }))} onStop={() => (stop.current = true)} />
+        progress={progress} onReplay={(next) => setReplay((r) => ({ id: (r?.id ?? 0) + 1, ...next }))} onStop={() => (stop.current = true)} />
     </div>
   );
 }

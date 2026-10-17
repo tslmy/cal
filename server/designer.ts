@@ -107,7 +107,7 @@ async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceS
     let raw: unknown;
     try {
       raw = crusoe
-        ? parseJson(await callModel(system, userPrompt(p, req, issues, previous), { role: "designer", temperature: 0.4 + n * 0.25 }))
+        ? parseJson(await callModel(system, userPrompt(p, req, issues, previous), { role: "designer", temperature: 0.4 + n * 0.25, cache: true }))
         : mockDraft(p, req, n, round, system);
     } catch (err) {
       if (err instanceof ModelError) {
@@ -153,7 +153,7 @@ async function judge(p: Persona, drafts: { title: string; reason: string; spec: 
     'Pick the one that best fits these habits as a small, explainable step. Reply with JSON only: {"pick": <index>, "why": "<one sentence>"}',
   ].join("\n");
   try {
-    const out = parseJson(await callModel("You are the lead critic of a calendar design team.", prompt, { role: "planner", temperature: 0.2 })) as { pick?: number; why?: string };
+    const out = parseJson(await callModel("You are the lead critic of a calendar design team.", prompt, { role: "planner", temperature: 0.2, cache: true })) as { pick?: number; why?: string };
     const d = drafts[Number(out.pick)];
     if (d) {
       trace.push({ role: "Critic", text: `Lead critic (${MODELS.planner}) picked "${d.title}": ${out.why ?? ""}` });

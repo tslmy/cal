@@ -15,7 +15,7 @@ export default function register(app: Express) {
   app.get("/api/state/:user", (req, res) => {
     const s = getUser(req.params.user);
     if (!s) return res.status(404).json({ error: "no such user" });
-    res.json({ ...s, mode: mode() });
+    res.json({ ...s, mode: mode(), designing: designing.has(s.id) });
   });
 
   app.post("/api/state/:user/reset", async (req, res) => {
@@ -101,8 +101,20 @@ export default function register(app: Express) {
 const CLASSIC = new Set(["MonthGrid", "WeekGrid"]);
 export const isNovel = (spec: CalendarSpec) => Object.values(spec.elements).some((e) => !CLASSIC.has(e.type) && e.type !== "Stack" && e.type !== "Section");
 
+// People the designer is working for right now, so the page can show it's busy.
+const designing = new Set<string>();
+
 // Runs the designer for one person and stores the result as a pending proposal.
 export async function proposeView(userId: string): Promise<{ proposal: Proposal | null }> {
+  designing.add(userId);
+  try {
+    return await propose(userId);
+  } finally {
+    designing.delete(userId);
+  }
+}
+
+async function propose(userId: string): Promise<{ proposal: Proposal | null }> {
   const s = getUser(userId);
   if (!s) throw new Error("no such user");
   const history = s.proposals.filter((p) => p.status !== "suggested").map((p) => ({ title: p.title, status: p.status }));
