@@ -1,42 +1,13 @@
-import { generateText } from "ai";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { catalog, type CalendarSpec } from "../src/shared/catalog";
 import { critique, mustShow, sharedPeriods } from "../src/shared/critic";
 import { daysBetween, isoWeek, mondayOf, TODAY } from "../src/shared/dates";
 import type { DesignRequest, DesignResponse, Persona, TraceStep } from "../src/shared/types";
 import { mockDraft } from "./mock";
-import { MODELS, resolveModels } from "./models";
+import { MODELS } from "./models";
+import { callModel, checkModels, crusoe, ModelError, parseJson } from "./llm";
 
 const DRAFTS = Number(process.env.DESIGNER_DRAFTS ?? 3);
 const REPAIRS = Number(process.env.DESIGNER_REPAIRS ?? 2);
-// Nemotron reasons before answering by default, which can eat the whole token budget and leave
-// no JSON. The designer's job is structured output, so thinking is off unless asked for.
-const THINKING = process.env.DESIGNER_THINKING === "1";
-// Crusoe limits requests per model, so draft designers take turns instead of all calling at once.
-const IN_FLIGHT = Number(process.env.DESIGNER_CONCURRENCY ?? 2);
-const BASE_URL = process.env.CRUSOE_BASE_URL ?? "https://api.inference.crusoecloud.com/v1";
-
-const crusoe = process.env.CRUSOE_API_KEY
-  ? createOpenAICompatible({ name: "crusoe", baseURL: BASE_URL, apiKey: process.env.CRUSOE_API_KEY })
-  : null;
-
-// Checked once per server start; a failed check is retried on the next request.
-let resolved: Promise<string[]> | null = null;
-function checkModels(): Promise<string[]> {
-  resolved ??= resolveModels(BASE_URL, process.env.CRUSOE_API_KEY!).catch((err) => {
-    resolved = null;
-    return [`Could not list models: ${(err as Error).message}`];
-  });
-  return resolved;
-}
-
-// An error from the API itself (wrong model, key or URL). Retrying the draft would not help.
-class ModelError extends Error {}
-function describe(err: unknown, model: string): string {
-  const e = err as { statusCode?: number; url?: string; responseBody?: string; message?: string };
-  const body = e.responseBody ? `: ${e.responseBody.replace(/\s+/g, " ").slice(0, 200)}` : e.message ? `: ${e.message}` : "";
-  return `Model call failed${e.statusCode ? ` (${e.statusCode})` : ""} for ${model}${e.url ? ` at ${e.url}` : ""}${body}`;
-}
 
 // The component list comes straight from the catalog, so the prompt never drifts from what the renderer supports.
 function componentDocs(): string {
@@ -105,65 +76,6 @@ function userPrompt(p: Persona, req: DesignRequest, issues?: string[], previous?
   return lines.join("\n");
 }
 
-function parseJson(text: string): unknown {
-  const cleaned = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").replace(/```(?:json)?/g, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start < 0 || end < start) throw new Error(cleaned ? `no JSON object in the reply: "${cleaned.slice(0, 80)}..."` : "the reply was empty");
-  return JSON.parse(cleaned.slice(start, end + 1));
-}
-
-// JSON mode and the thinking switch are extensions; if the endpoint rejects them, drop them for good.
-let extras = true;
-
-// A small per-model queue so parallel drafts don't trip the rate limit.
-const queues = new Map<string, { active: number; waiting: (() => void)[] }>();
-async function slot<T>(model: string, run: () => Promise<T>): Promise<T> {
-  const q = queues.get(model) ?? { active: 0, waiting: [] };
-  queues.set(model, q);
-  if (q.active >= IN_FLIGHT) await new Promise<void>((r) => q.waiting.push(r));
-  q.active++;
-  try {
-    return await run();
-  } finally {
-    q.active--;
-    q.waiting.shift()?.();
-  }
-}
-
-async function callModel(system: string, prompt: string, temperature: number, model: string = MODELS.designer): Promise<string> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const { text, finishReason } = await slot(model, () =>
-        generateText({
-          model: crusoe!(model),
-          system,
-          prompt,
-          temperature,
-          maxOutputTokens: 6000,
-          maxRetries: 0, // retried below, with longer waits that fit a per-minute limit
-          providerOptions: extras ? { crusoe: { response_format: { type: "json_object" }, chat_template_kwargs: { enable_thinking: THINKING } } } : {},
-        }),
-      );
-      if (!text.trim() && finishReason === "length") return "(ran out of tokens before answering)";
-      return text;
-    } catch (err) {
-      const e = err as { statusCode?: number; responseHeaders?: Record<string, string> };
-      if (extras && (e.statusCode === 400 || e.statusCode === 422)) {
-        console.warn(`[designer] ${describe(err, model)}. Retrying without JSON mode and the thinking switch.`);
-        extras = false;
-        continue;
-      }
-      if (attempt < 4 && (e.statusCode === 429 || e.statusCode === 503)) {
-        const after = Number(e.responseHeaders?.["retry-after"]);
-        await new Promise((r) => setTimeout(r, after > 0 ? after * 1000 : 2000 * 2 ** attempt + Math.random() * 1000));
-        continue;
-      }
-      throw new ModelError(describe(err, model));
-    }
-  }
-}
-
 // How many of the user's time scales the view shows. Ties go to views that share more with the current one.
 const SCALES: Record<string, string[]> = { YearBand: ["year", "quarter"], WeekStrip: ["week", "year"], WeekGrid: ["week", "day"], MonthGrid: ["month", "day"] };
 function fit(p: Persona, spec: CalendarSpec): number {
@@ -175,7 +87,7 @@ function fit(p: Persona, spec: CalendarSpec): number {
 type Draft = { title: string; reason: string; spec: CalendarSpec; score: number } | { none: string } | null;
 
 // One designer sub-agent: draft, run the critic, repair until it passes or runs out of tries.
-async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceStep[]): Promise<Draft> {
+async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceStep[], system: string): Promise<Draft> {
   const role = `Designer ${n + 1}`;
   let issues: string[] | undefined;
   let previous: string | undefined;
@@ -183,7 +95,7 @@ async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceS
     let raw: unknown;
     try {
       raw = crusoe
-        ? parseJson(await callModel(systemPrompt(), userPrompt(p, req, issues, previous), 0.4 + n * 0.25))
+        ? parseJson(await callModel(system, userPrompt(p, req, issues, previous), { role: "designer", temperature: 0.4 + n * 0.25 }))
         : mockDraft(p, req, n, round);
     } catch (err) {
       if (err instanceof ModelError) {
@@ -229,7 +141,7 @@ async function judge(p: Persona, drafts: { title: string; reason: string; spec: 
     'Pick the one that best fits these habits as a small, explainable step. Reply with JSON only: {"pick": <index>, "why": "<one sentence>"}',
   ].join("\n");
   try {
-    const out = parseJson(await callModel("You are the lead critic of a calendar design team.", prompt, 0.2, MODELS.planner)) as { pick?: number; why?: string };
+    const out = parseJson(await callModel("You are the lead critic of a calendar design team.", prompt, { role: "planner", temperature: 0.2 })) as { pick?: number; why?: string };
     const d = drafts[Number(out.pick)];
     if (d) {
       trace.push({ role: "Critic", text: `Lead critic (${MODELS.planner}) picked "${d.title}": ${out.why ?? ""}` });
@@ -241,11 +153,13 @@ async function judge(p: Persona, drafts: { title: string; reason: string; spec: 
   return drafts[0];
 }
 
-export async function design(p: Persona, req: DesignRequest): Promise<DesignResponse> {
+// `system` is the designer's full prompt: the fixed core from systemPrompt() plus whatever the
+// meta-learner has written about this person (see prompts.ts).
+export async function design(p: Persona, req: DesignRequest, system: string = systemPrompt()): Promise<DesignResponse> {
   const trace: TraceStep[] = [];
   if (crusoe) for (const note of await checkModels()) if (/^(planner|designer)|Could not/.test(note)) trace.push({ role: "Designer", text: note });
   trace.push({ role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${DRAFTS} draft designers${crusoe ? ` on ${MODELS.designer}` : " (offline mock: no CRUSOE_API_KEY)"}.` });
-  const drafts = await Promise.all(Array.from({ length: DRAFTS }, (_, n) => runDraft(n, p, req, trace)));
+  const drafts = await Promise.all(Array.from({ length: DRAFTS }, (_, n) => runDraft(n, p, req, trace, system)));
   const good = drafts.filter((d): d is Extract<Draft, { spec: CalendarSpec }> => !!d && "spec" in d);
   if (!good.length) {
     const none = drafts.find((d) => d && "none" in d);
