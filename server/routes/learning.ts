@@ -161,7 +161,7 @@ async function replayWeek(user: string, persona: string, weeks: number, k: numbe
     });
     activity(s, "Replay", `Week ${k + 1} of ${weeks}: ${p.name} added ${created} event${created === 1 ? "" : "s"}${switches.length ? ` and switched views ${switches.length} times` : ""}.`);
   });
-  await runLearner(user, `Week ${k + 1}`);
+  await runLearner(user, `Week ${k + 1}`, { learnedOnly: true });
   if (k === weeks - 1) await update(user, (s) => activity(s, "Replay", `Done replaying ${p.name}'s ${weeks} weeks.`));
 }
 

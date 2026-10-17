@@ -18,15 +18,20 @@ const counts = new Map<string, number>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const chains = new Map<string, Promise<unknown>>();
 
-// Runs one learner pass and the gate, one at a time per person.
-export function runLearner(userId: string, label?: string): Promise<LearnResult> {
+// Runs one learner pass and the gate, one at a time per person. With `learnedOnly`, the promise
+// settles once the learner has finished, while the gate (and any designer run) carries on behind
+// it in the same queue, so a replayed week doesn't wait minutes for a suggestion.
+export function runLearner(userId: string, label?: string, { learnedOnly = false } = {}): Promise<LearnResult> {
+  let learned!: (out: LearnResult) => void;
+  const early = new Promise<LearnResult>((r) => (learned = r));
   const next = (chains.get(userId) ?? Promise.resolve()).then(async () => {
     const out = await learn(userId, label);
+    learned(out);
     if (out.crossings.length) await gate(userId, out.crossings);
     return out;
   });
   chains.set(userId, next.catch((err) => console.error("[loop]", err)));
-  return next;
+  return learnedOnly ? Promise.race([early, next]) : next;
 }
 
 function schedule(userId: string, ms: number) {
