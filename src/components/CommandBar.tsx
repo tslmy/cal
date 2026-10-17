@@ -72,7 +72,10 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function ChatLog({ lines, onClear }: { lines: { id: number; text: string }[]; onClear: () => void }) {
   const end = useRef<HTMLLIElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end", behavior: "smooth" }), [lines.length]);
+  // Chrome now returns a Promise from scrollIntoView, which React would take for a clean-up function.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [lines.length]);
   return (
     <div className="relative">
       <ol aria-label="Sent requests" className="m-0 flex h-36 list-none flex-col gap-1.5 overflow-y-auto p-0 pr-1">
