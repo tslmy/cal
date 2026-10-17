@@ -21,7 +21,7 @@ function BeliefRow({ b, threshold, onDelete }: { b: Belief; threshold: number; o
         </div>
         <span className={`w-9 text-right font-mono text-xs ${above ? "text-accent" : "text-muted"}`}>{b.confidence.toFixed(2)}</span>
       </div>
-      <span className="text-xs text-faint">{b.evidence.length ? `${b.evidence.length} logged signal${b.evidence.length === 1 ? "" : "s"}` : "From the sample profile"}</span>
+      <span className="text-xs text-faint">{b.evidence.length ? `${b.evidence.length} logged signal${b.evidence.length === 1 ? "" : "s"}` : b.key.startsWith("seed.") ? "From the sample profile" : "Starting guess, no signals yet"}</span>
     </li>
   );
 }
