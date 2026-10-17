@@ -63,6 +63,10 @@ export function critique(spec: unknown, events: CalEvent[], current?: CalendarSp
   const els = Object.values(s.elements);
   if (els.length > 14) issues.push(`Too many elements (${els.length}); keep views to 14 or fewer.`);
 
+  // A draft can pass the schema with a date or year that does not exist (a year of 0, a weekOf of "this week").
+  const bad = els.filter((e) => { try { rangeOf(e); return false; } catch { return true; } });
+  if (bad.length) return { ok: false, issues: bad.map((e) => `${e.type} props ${JSON.stringify(e.props)} do not name a real date or year.`) };
+
   const views = els.filter((e) => rangeOf(e));
   if (!views.length) issues.push("No calendar view in the spec (MonthGrid, WeekGrid, WeekStrip or YearBand).");
 
@@ -71,7 +75,7 @@ export function critique(spec: unknown, events: CalEvent[], current?: CalendarSp
       const r = rangeOf(v)!;
       return overlaps(e, r[0], r[1]);
     });
-    if (!covered) issues.push(`"${e.title}" (${evStart(e)} to ${evEnd(e)}) is not visible in any view.`);
+    if (!covered) issues.push(`"${e.title}" (${evStart(e)} to ${evEnd(e)}) is not visible in any view; keep or add a view whose range covers it, such as a YearBand.`);
   }
 
   for (const v of views.filter((v) => v.type === "WeekGrid")) {

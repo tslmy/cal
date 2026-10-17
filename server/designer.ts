@@ -60,7 +60,7 @@ function userPrompt(p: Persona, req: DesignRequest, issues?: string[], previous?
     `Signals: ${JSON.stringify(p.profile.signals)}`,
     "",
     `EVENTS: ${evs.length} total, ${long.length} lasting a week or more, ${timed.length} timed, ${weekend.length} on weekends.`,
-    `Range: ${evs.map((e) => e.start).sort()[0].slice(0, 10)} to ${evs.map((e) => e.end).sort().at(-1)!.slice(0, 10)}.`,
+    evs.length ? `Range: ${evs.map((e) => e.start).sort()[0].slice(0, 10)} to ${evs.map((e) => e.end).sort().at(-1)!.slice(0, 10)}.` : "Range: no events yet.",
     "Events that must stay visible:",
     ...sample,
     "",
