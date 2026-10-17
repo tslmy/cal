@@ -3,7 +3,7 @@ import { z } from "zod";
 import { activity, DAY_ONE, getUser, log, newId, resetUser, update } from "../store";
 import { runLearner } from "../loop";
 import { personaById } from "../../src/shared/personas";
-import { mondayOf, TODAY, weekday } from "../../src/shared/dates";
+import { daysBetween, mondayOf, TODAY, weekday } from "../../src/shared/dates";
 import { fmtDate, fmtWhen } from "../../src/shared/when";
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -104,12 +104,13 @@ export default function register(app: Express) {
   });
 }
 
-// The sample person's events split into simulated weeks. Someone with a dense calendar adds events
-// as the weeks come; a long-range planner adds plans in no particular date order, so their weeks
-// get an even mix.
+// The sample person's events split into simulated weeks. Someone with a dense calendar fills in
+// the dates nearest today first, so the calendar on screen (which shows today) grows from the first
+// week; a long-range planner adds plans in no particular date order, so their weeks get an even mix.
 function batches(persona: string, weeks: number): CalEvent[][] {
   const p = personaById(persona)!;
-  const sorted = [...p.events].sort((a, b) => a.start.localeCompare(b.start));
+  const near = (e: CalEvent) => Math.abs(daysBetween(TODAY, e.start.slice(0, 10)));
+  const sorted = [...p.events].sort((a, b) => near(a) - near(b) || a.start.localeCompare(b.start));
   const dense = sorted.length >= weeks * 5;
   const weekOf = (i: number) => (dense ? Math.floor((i * weeks) / sorted.length) : i % weeks);
   return Array.from({ length: weeks }, (_, k) => sorted.filter((_, i) => weekOf(i) === k));
