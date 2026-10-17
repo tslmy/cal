@@ -23,7 +23,7 @@ function Scrub({ user, state, progress, onReplay, onStop }: { user: string; stat
     setLoading(true);
     try {
       const { weeks } = await api<{ weeks: string[][] }>(`/api/learning/replay-plan/${who}?weeks=8`);
-      await api(`/api/state/${user}/reset`, {});
+      await api(`/api/state/${user}/reset`, { blank: true });
       await qc.invalidateQueries({ queryKey: stateKey(user) });
       const lines = weeks.flat();
       const lastOf = weeks.map((_, k) => weeks.slice(0, k + 1).flat().length - 1);
@@ -60,7 +60,7 @@ function Scrub({ user, state, progress, onReplay, onStop }: { user: string; stat
           </button>
         )}
       </div>
-      <p className="m-0 text-xs text-faint">Starts {state.name} over, then sends {name}'s requests week by week while the calendar and what I've learned grow.</p>
+      <p className="m-0 text-xs text-faint">Empties {state.name}'s calendar and what I've learned, then sends {name}'s requests week by week while both grow back.</p>
     </section>
   );
 }

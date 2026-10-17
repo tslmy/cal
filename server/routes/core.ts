@@ -19,7 +19,7 @@ export default function register(app: Express) {
   });
 
   app.post("/api/state/:user/reset", async (req, res) => {
-    await resetUser(req.params.user);
+    await resetUser(req.params.user, req.body?.blank === true);
     res.json(getUser(req.params.user));
   });
 

@@ -57,10 +57,12 @@ export async function update<T>(id: string, fn: (s: UserState) => T): Promise<T>
   return out;
 }
 
-export async function resetUser(id: string) {
+// `blank` keeps who the person is but none of their sample events, habits or preset view, so a
+// replay can show everything being built up from nothing.
+export async function resetUser(id: string, blank = false) {
   const p = SEEDS.find((x) => x.id === id);
   if (!p) throw new Error(`no such user: ${id}`);
-  db.data.users[id] = seed(p);
+  db.data.users[id] = seed(blank ? { ...NEW_PERSON, id: p.id, name: p.name, role: p.role } : p);
   await db.write();
 }
 

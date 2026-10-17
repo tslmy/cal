@@ -86,7 +86,7 @@ export default function register(app: Express) {
     if (!getUser(req.params.user)) return res.status(404).json({ error: "no such user" });
     if (body.data.week !== undefined) {
       const { persona, weeks, week } = body.data;
-      if (week === 0) await resetUser(req.params.user);
+      if (week === 0) await resetUser(req.params.user, true);
       await replayWeek(req.params.user, persona, weeks, week);
       return res.json(getUser(req.params.user));
     }
