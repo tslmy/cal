@@ -1,0 +1,39 @@
+Return-Path: <reservations@granlibakken.example.com>
+Message-ID: <conf-GT48213.20261009@granlibakken.example.com>
+Date: Fri, 09 Oct 2026 14:22:05 -0700
+From: Granlibakken Tahoe Reservations <reservations@granlibakken.example.com>
+To: You <you@example.com>
+Subject: Booking confirmation: Granlibakken Tahoe, Nov 4-7
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1_conf"
+
+--b1_conf
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hi,
+
+Thanks for booking with Granlibakken Tahoe. Your reservation is confirmed.
+
+Confirmation number: GT48213
+Room: Lodge King, 1 guest
+
+Check-in: Wednesday, November 4, 2026 from 4:00 PM
+Check-out: Saturday, November 7, 2026 by 11:00 AM
+
+Address: 725 Granlibakken Rd, Tahoe City, CA 96145
+
+Need to change your dates? Reply to this email or call us at (530) 555-0142.
+
+See you in the mountains,
+Granlibakken Tahoe
+
+--b1_conf
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Thanks for booking with Granlibakken Tahoe. Your reservation is confirmed.</p>
+<p>Confirmation number: <b>GT48213</b><br>Room: Lodge King, 1 guest</p>
+<p>Check-in: Wednesday, November 4, 2026 from 4:00 PM<br>Check-out: Saturday, November 7, 2026 by 11:00 AM</p>
+<p>725 Granlibakken Rd, Tahoe City, CA 96145</p></body></html>
+
+--b1_conf--
