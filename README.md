@@ -1,41 +1,63 @@
 # Evolve
 
-A calendar whose layout adapts to each user. A habit agent writes down what it has learned about how someone plans; the **designer agent** reads that and suggests a better view. Nothing changes until the user turns the suggestion on, and Undo turns it off again.
+A calendar that becomes more personal the more it is used. People add, change and remove events by typing a sentence or importing a file. A habit learner turns what they do into beliefs with confidence scores. When a belief crosses the threshold, the designer agent proposes one view change, which morphs in and can always be undone. A meta-learner watches how people react to those proposals and rewrites every agent's prompt to match, its own included.
+
+Built for the Crusoe Recursive Agents Hackathon. All agents run on Crusoe Managed Inference. Without a key, every agent falls back to an offline mock, so the whole demo also runs with no network.
 
 ## Run it
 
 ```bash
 npm install
-cp .env.example .env   # add CRUSOE_API_KEY for live Nemotron calls; leave empty for offline mock mode
-npm run dev            # web on :5173, designer agent on :8787
+cp .env.example .env   # add CRUSOE_API_KEY for live models; leave empty for offline mock mode
+npm run dev            # web on :5173, agents on :8787
 ```
 
-`npm run try-designer` runs the designer loop for all three sample users in the terminal.
+State is saved in `data/evolve.json`. To start everyone fresh, delete that file, or press **Start over** to reset one person.
+
+## Demo (about 3 minutes, works offline)
+
+1. Pick **You** (a new person with no events and nothing learned).
+2. Type `lunch with Ana Thursday around noon`, check the fields, and press Enter. The time is stored as approximate and drawn with a dashed edge.
+3. Type `dentist tomorrow 10am`, then `empty out my weekend for a business trip`. The preview lists what will be removed and added. Apply it, then use **Undo** on the toast.
+4. **Import → Calendar file**: `samples/team-offsite.ics`. Import it again: nothing new is added. **Import → Text file**: `samples/weekend-trip.txt` produces moves and removals, not just additions.
+5. In "What I've learned", choose Sam and press **Replay**. Eight simulated weeks feed the log, beliefs grow, one crosses 0.70, and a suggestion appears that cites the habit with its number.
+6. Press **Try it** and the view morphs. Press **Undo** and it morphs back. Ask the designer again, try the second invented view, and undo it too.
+7. The meta-learner lowers novelty appetite, rewrites the designer's learned section (the diff shows in Agent activity, and every version is listed under "What each agent is told"), and the next suggestion is a plain month view.
+
+The view buttons (Month, Week, Work week, Work hours, Year, Years) morph too, and those switches are logged as signals.
 
 ## How it fits together
 
-- `src/shared/catalog.ts`: the json-render catalog. The six building blocks (Stack, Section, MonthGrid, WeekGrid, WeekStrip, YearBand) are the only things the designer can compose. Specs say *how* to show events; components read the events themselves.
-- `server/designer.ts`: the designer agent. System prompt with its rules, then N parallel draft designers (`DESIGNER_DRAFTS`), each checked by the critic and repaired with the critic's feedback up to `DESIGNER_REPAIRS` times. The best passing draft is offered as a suggestion.
-- `src/shared/critic.ts`: mechanical checks, no LLM. Every event this week and every plan of a week or longer ahead must be visible; week grids may not cut off meetings; the spec must match the catalog; the proposal must differ from the current view.
-- `server/mock.ts`: offline stand-in for the model. Some first drafts are deliberately flawed so the critic and repair loop show up in the activity panel.
-- `server/models.ts`: one Nemotron model per agent role on Crusoe's OpenAI-compatible endpoint (rate limits are per model). Draft designers run on Nemotron 3.5 Lightning 30B; the lead critic that picks among passing drafts runs on Nemotron 3 Super 120B; Nano 30B is set aside for small high-volume calls such as the future habit agent's classification.
-- `src/registry.tsx`: React implementations. Every day, week and month gets a stable Motion `layoutId` (`day-2026-10-17`, `week-2026-42`, `month-2026-10`), so any two views morph into each other, including views the designer invents later.
-- `src/App.tsx`: suggestion card (Try it / Not now), view switches with Undo, what the habit agent has learned, and the agent activity log.
-- `src/shared/personas.ts`: three sample users (Mina, Jordan, Sam) with events and learned profiles. The profiles stand in for the habit agent until it exists.
+```
+sentence / file ─▶ intent parser / importer ─▶ change set (preview, apply, undo)
+                                                  │
+           every action ─▶ interaction log ◀──────┘
+                               │
+        habit learner ◀────────┤  beliefs with confidence and evidence
+             │                 │
+   proposal gate (threshold, cadence, no repeats) ─▶ designer + critic ─▶ suggestion
+                               │                                      │
+        meta-learner ◀─────────┘◀──── accept / dismiss / revert ◀─────┘
+             │
+             └─▶ rewrites every agent's learned prompt section (versioned, replayed before adoption, rollback)
+```
 
-## Designer rules (from the system prompt)
+| Agent | File | Model (Crusoe) |
+|---|---|---|
+| Intent parser | `server/agents/intent.ts` | `openai/gpt-oss-120b` (role `intent`) |
+| Importer | `server/agents/importer.ts` (.ics in code with ical.js; email with mailparser plus a model) | Nemotron 3.5 Lightning |
+| Habit learner | `server/agents/habit.ts` | Nemotron 3 Nano (role `router`) |
+| Meta-learner | `server/agents/meta.ts` | Nemotron 3 Super (role `planner`) |
+| Designer + critic | `server/designer.ts`, `src/shared/critic.ts` | Lightning drafts, Super lead critic |
+| Proposal gate and loop | `server/loop.ts` | plain code |
 
-1. Always offer a UI change as a suggestion; the user switches it on, like a feature switch.
-2. One change at a time, the smallest step that fits.
-3. Animate layout transitions: keep periods that are on screen now on screen in the new view, so the app can morph between them.
-4. Never hide an event.
-5. Cite the habit, with its number, in the reason.
-6. Don't re-propose anything dismissed or undone.
-7. Propose nothing when the view already fits.
-8. 14 elements or fewer.
+- **Prompts** (`server/prompts.ts`): each agent's system prompt is a fixed core followed by a learned "About this person" section. Only the meta-learner writes the learned part, and the core stays byte-identical so the prefix cache still hits. Each rewrite is stored as a version with its diff, reason and evidence. It is replayed against the person and the sample personas before adoption, and rolled back automatically after two reverts of proposals made under it.
+- **Model calls** (`server/llm.ts`): JSON validated with Zod and retried with the validation error. Each model has its own queue under Crusoe's per-model rate limit, with backoff on 429 and 503.
+- **State** (`server/store.ts`): one JSON file via lowdb, holding events, the interaction log, beliefs, proposals, prompt versions and activity.
+- **Views** (`src/shared/catalog.ts`, `src/registry.tsx`): json-render specs over six building blocks. Every day, week and month has a stable Motion `layoutId`, so any two views morph, including ones the designer invents. No view hides an event: anything filtered out shows up as an overflow marker.
 
 ## Not done yet
 
-- Live mode is untested: no Crusoe key in the build environment. Check model IDs with `GET /v1/models`.
-- The habit (observer) agent: profiles are hand-written in `personas.ts`.
-- State lives in the browser only; refresh resets it.
+- Live mode has not been run end to end in the build environment, which had no Crusoe key. Check the model IDs with `GET /v1/models`; the server logs what it swapped in.
+- Gmail connection (P6): email import works from `.eml` files, but there is no OAuth connection to a mailbox.
+- The month and year morph shows the week bricks briefly as scaled blocks.
