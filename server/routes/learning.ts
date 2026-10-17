@@ -17,6 +17,7 @@ const Replay = z.object({
   delayMs: z.number().int().min(0).max(5000).default(1200),
   wait: z.boolean().default(false),
   week: z.number().int().min(0).max(25).optional(), // apply just this week (the chat-style scrub); week 0 starts from a clean slate
+  line: z.number().int().min(0).optional(), // and just this request of the week; the week's last request runs the learner
 });
 
 const WEEK_MS = 7 * 86400000;
@@ -86,8 +87,8 @@ export default function register(app: Express) {
     if (!getUser(req.params.user)) return res.status(404).json({ error: "no such user" });
     if (body.data.week !== undefined) {
       const { persona, weeks, week } = body.data;
-      if (week === 0) await resetUser(req.params.user, true);
-      await replayWeek(req.params.user, persona, weeks, week);
+      if (week === 0 && !body.data.line) await resetUser(req.params.user, true);
+      await replayWeek(req.params.user, persona, weeks, week, body.data.line);
       return res.json(getUser(req.params.user));
     }
     const run = replay(req.params.user, body.data);
@@ -118,10 +119,14 @@ function batches(persona: string, weeks: number): CalEvent[][] {
 
 // What the person might have typed to add a week's events: one request per title, so a daily
 // standup reads as one sentence rather than five.
+function groups(batch: CalEvent[]): CalEvent[][] {
+  const by = new Map<string, CalEvent[]>();
+  for (const e of batch) by.set(e.title, [...(by.get(e.title) ?? []), e]);
+  return [...by.values()];
+}
 function sentences(batch: CalEvent[]): string[] {
-  const groups = new Map<string, CalEvent[]>();
-  for (const e of batch) groups.set(e.title, [...(groups.get(e.title) ?? []), e]);
-  return [...groups.entries()].map(([title, evs]) => {
+  return groups(batch).map((evs) => {
+    const title = evs[0].title;
     const e = evs[0];
     if (evs.length === 1) {
       if (e.start.length > 10) return `${title} on ${fmtWhen(e)}`;
@@ -135,13 +140,17 @@ function sentences(batch: CalEvent[]): string[] {
   });
 }
 
-async function replayWeek(user: string, persona: string, weeks: number, k: number) {
+// Adds one simulated week, or with `line` just that request's events, so the calendar grows one
+// chat message at a time. The week's view switches and learner pass come with its last request.
+async function replayWeek(user: string, persona: string, weeks: number, k: number, line?: number) {
   const p = personaById(persona)!;
-  const batch = batches(persona, weeks)[k] ?? [];
+  const all = groups(batches(persona, weeks)[k] ?? []);
+  const batch = line === undefined ? all.flat() : (all[line] ?? []);
+  const last = line === undefined || line >= all.length - 1;
   const t0 = Date.now() - (weeks - k) * WEEK_MS;
   const at = (hours: number) => new Date(t0 + hours * 3600000).toISOString();
   await update(user, (s) => {
-    if (k === 0) activity(s, "Replay", `Replaying ${p.name}'s last ${weeks} weeks into ${s.name}'s log (demo).`);
+    if (k === 0 && !line) activity(s, "Replay", `Replaying ${p.name}'s last ${weeks} weeks into ${s.name}'s log (demo).`);
     const have = new Set(s.events.map((e) => e.uid));
     const add = (i: Omit<Interaction, "id" | "source">) => s.interactions.push({ id: newId("i"), source: "sample", ...i, payload: { ...i.payload, replay: persona } });
     let created = 0;
@@ -154,13 +163,14 @@ async function replayWeek(user: string, persona: string, weeks: number, k: numbe
       created++;
     });
     // Jordan opens the week view on most visits; the others stay on whatever they had.
-    const switches = persona === "jordan" ? [k === 2 ? DAY_ONE : WEEK_VIEW, WEEK_VIEW] : [];
+    const switches = persona === "jordan" && last ? [k === 2 ? DAY_ONE : WEEK_VIEW, WEEK_VIEW] : [];
     switches.forEach((to, n) => {
       add({ at: at(24 * (1 + 2 * n) + 9), kind: "view_switch", payload: { from: DAY_ONE, to, label: to === DAY_ONE ? "Month" : "Week" } });
       add({ at: at(24 * (1 + 2 * n) + 9.3), kind: "dwell", payload: { spec: to, seconds: 900 } });
     });
-    activity(s, "Replay", `Week ${k + 1} of ${weeks}: ${p.name} added ${created} event${created === 1 ? "" : "s"}${switches.length ? ` and switched views ${switches.length} times` : ""}.`);
+    if (last) activity(s, "Replay", line !== undefined ? `Week ${k + 1} of ${weeks} done${switches.length ? `; ${p.name} switched views ${switches.length} times` : ""}.` : `Week ${k + 1} of ${weeks}: ${p.name} added ${created} event${created === 1 ? "" : "s"}${switches.length ? ` and switched views ${switches.length} times` : ""}.`);
   });
+  if (!last) return;
   await runLearner(user, `Week ${k + 1}`, { learnedOnly: true });
   if (k === weeks - 1) await update(user, (s) => activity(s, "Replay", `Done replaying ${p.name}'s ${weeks} weeks.`));
 }

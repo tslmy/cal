@@ -39,16 +39,15 @@ function ReplayPerson({ user, state, progress, onReplay, onStop }: { user: strin
       const { weeks } = await api<{ weeks: string[][] }>(`/api/learning/replay-plan/${user}?weeks=8`);
       await clear();
       const lines = weeks.flat();
-      const lastOf = weeks.map((_, k) => weeks.slice(0, k + 1).flat().length - 1);
-      let done = 0; // weeks applied so far
+      const where = weeks.flatMap((w, k) => w.map((_, line) => ({ week: k, line })));
+      const post = (body: object) => api(`/api/learning/${user}/replay`, { persona: user, weeks: weeks.length, ...body });
+      // Adds each request's events before the next request is typed, so the calendar grows with
+      // the chat. A week's last request also runs the learner (and any empty weeks after it).
       const apply = async (i: number) => {
-        // Applies every week whose last request has now been sent (empty weeks ride along).
-        let after: ServerState | undefined;
-        while (done < weeks.length && (lastOf[done] <= i || i === lines.length - 1)) {
-          after = await api(`/api/learning/${user}/replay`, { persona: user, weeks: weeks.length, week: done });
-          done++;
-          await qc.invalidateQueries({ queryKey: stateKey(user) });
-        }
+        let after = await post(where[i]);
+        if (where[i].line === weeks[where[i].week].length - 1)
+          for (let k = where[i].week + 1; k < weeks.length && !weeks[k].length; k++) after = await post({ week: k });
+        await qc.invalidateQueries({ queryKey: stateKey(user) });
         return after;
       };
       onReplay({ lines, apply, fresh: true });

@@ -217,7 +217,7 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
       const id = say(line);
       try {
         if (applyLine) {
-          // A simulated week lands after its last request; everything sent so far is then read.
+          // The request's events land before the next request is typed.
           const s = await orStop(applyLine(i));
           if (s) mark((l) => l.user === user && l.status === "reading", { status: "read", ...through(s) });
         } else {
