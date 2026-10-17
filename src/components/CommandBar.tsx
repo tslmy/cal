@@ -115,6 +115,8 @@ function ChatLog({ lines, learnedThrough, onClear }: { lines: Sent[]; learnedThr
 // `apply`, when given, replaces parsing: the time scrub sends its own requests and applies each
 // simulated week itself once its last line is sent.
 // It resolves to the person's state when it applied something, so the lines sent so far are marked read.
+let started = 0; // the last replay id this page has run, kept outside the component on purpose
+
 export type Replay = { id: number; lines: string[]; apply?: (i: number) => Promise<ServerState | undefined>; fresh?: boolean };
 
 export function CommandBar({ user, replay: request, onProgress, stop, children }: {
@@ -225,7 +227,10 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
   };
 
   useEffect(() => {
-    if (request) void play(request);
+    // Switching people remounts the bar; a replay that already ran must not start again for them.
+    if (!request || request.id <= started) return;
+    started = request.id;
+    void play(request);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per replay request
   }, [request?.id]);
 
