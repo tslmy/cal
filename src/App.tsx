@@ -21,7 +21,7 @@ export default function App() {
   const active = s?.proposals.filter((p) => p.status === "accepted").at(-1);
 
   return (
-    <div className="min-h-screen px-4 pb-12 pt-6 sm:px-6">
+    <div className="min-h-screen px-4 pb-64 pt-6 sm:px-6">
       <div className="mx-auto flex max-w-[1400px] flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -44,11 +44,6 @@ export default function App() {
 
         {s && (
           <>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-0 flex-[1_1_480px]"><CommandBar user={user} /></div>
-              <ImportMenu user={user} />
-            </div>
-
             <div className="flex flex-wrap items-start gap-5">
               <main className="flex min-w-0 flex-[999_1_640px] flex-col gap-4 rounded-2xl border border-line bg-white p-5">
                 <ViewSwitcher user={user} spec={s.spec} />
@@ -62,6 +57,12 @@ export default function App() {
                 <PromptsPanel user={user} state={s} />
                 <ActivityPanel steps={s.activity} mode={s.mode} busy={ask.isPending} onAsk={() => ask.mutate(undefined)} />
               </aside>
+            </div>
+
+            <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-subtle/90 px-4 pb-3 pt-2 backdrop-blur sm:px-6">
+              <div className="mx-auto max-w-[1400px]">
+                <CommandBar user={user}><ImportMenu user={user} /></CommandBar>
+              </div>
             </div>
           </>
         )}

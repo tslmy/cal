@@ -89,7 +89,7 @@ export function ImportMenu({ user }: { user: string }) {
         <input key={k.kind} ref={(el) => void (inputs.current[k.kind] = el)} type="file" hidden accept={k.accept} multiple={k.multiple} onChange={(e) => onFiles(k.kind, e.target)} />
       ))}
       {open && (
-        <div role="menu" className="absolute right-0 z-30 mt-2 flex w-72 flex-col rounded-xl border border-line bg-white p-1 shadow-lg">
+        <div role="menu" className="absolute bottom-full right-0 z-30 mb-2 flex w-72 flex-col rounded-xl border border-line bg-white p-1 shadow-lg">
           {KINDS.map((k) => (
             <button key={k.kind} type="button" role="menuitem" onClick={() => pick(k.kind)} className="flex flex-col rounded-lg px-3 py-2 text-left hover:bg-subtle">
               <span className="text-sm font-semibold">{k.label}</span>
@@ -99,7 +99,7 @@ export function ImportMenu({ user }: { user: string }) {
         </div>
       )}
       {preview && (
-        <div className="absolute right-0 z-30 mt-2 max-h-[70vh] w-[min(28rem,calc(100vw-2rem))] overflow-auto rounded-2xl shadow-lg">
+        <div className="absolute bottom-full right-0 z-30 mb-2 max-h-[60vh] w-[min(28rem,calc(100vw-2rem))] overflow-auto rounded-2xl shadow-lg">
           <ChangePreview changeSet={preview} busy={apply.isPending} onConfirm={() => confirm(preview)} onCancel={() => setPreview(null)} />
         </div>
       )}

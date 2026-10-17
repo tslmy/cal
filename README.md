@@ -24,6 +24,8 @@ State is saved in `data/evolve.json`. To start everyone fresh, delete that file,
 6. Press **Try it** and the view morphs. Press **Undo** and it morphs back. Ask the designer again, try the second invented view, and undo it too.
 7. The meta-learner lowers novelty appetite, rewrites the designer's learned section (the diff shows in Agent activity, and every version is listed under "What each agent is told"), and the next suggestion is a plain month view.
 
+To fast-forward a person, press **Replay requests** next to the sentence box and pick a text file with one request per line (for example `samples/weekend-trip.txt`). Each line is typed into the box, sent as a chat bubble and applied without review, so the audience sees someone using the calendar at speed. Replayed sentences hit the replay cache, so a second run is instant even in live mode.
+
 The view buttons (Month, Week, Work week, Work hours, Year, Years) morph too, and those switches are logged as signals.
 
 ## How it fits together
