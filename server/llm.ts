@@ -131,7 +131,7 @@ export async function structured<S extends z.ZodType>(
   schema: S,
   system: string,
   prompt: string,
-  opts: { role?: Role; model?: string; temperature?: number } = {},
+  opts: { role?: Role; model?: string; temperature?: number; cache?: boolean } = {},
 ): Promise<z.infer<S>> {
   let last = "";
   let problem = "";
