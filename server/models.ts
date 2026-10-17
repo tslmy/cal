@@ -28,11 +28,15 @@ export async function resolveModels(baseURL: string, apiKey: string): Promise<st
   for (const role of Object.keys(MODELS) as Role[]) {
     const want = MODELS[role];
     if (ids.includes(want)) continue;
-    // Prefer plain chat models over omni (vision/audio) variants.
-    const nemotron = ids.filter((id) => /nemotron/i.test(id)).sort((a, b) => Number(/omni/i.test(a)) - Number(/omni/i.test(b)));
-    const sameName = ids.find((id) => id.toLowerCase() === want.toLowerCase());
+    // Prefer plain chat models over omni and VL (vision/audio) variants.
+    const media = (id: string) => Number(/omni|-vl\b/i.test(id));
+    const nemotron = ids.filter((id) => /nemotron/i.test(id)).sort((a, b) => media(a) - media(b));
+    // Same model under a different case or vendor prefix, e.g. nvidia/Nemotron-3-Super-120B-A12B
+    // served as nvidia/NVIDIA-Nemotron-3-Super-120B-A12B.
+    const name = want.split("/").pop()!.toLowerCase();
+    const sameName = ids.find((id) => id.toLowerCase() === want.toLowerCase()) ?? ids.find((id) => id.toLowerCase().endsWith(name));
     if (sameName) {
-      MODELS[role] = sameName; // only the capitalization differed, nothing worth showing
+      MODELS[role] = sameName; // only the spelling differed, nothing worth showing
       continue;
     }
     const found =

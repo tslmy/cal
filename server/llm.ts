@@ -68,6 +68,8 @@ export type Role = keyof typeof MODELS;
 
 // One raw call. Throws ModelError for API problems.
 export async function callModel(system: string, prompt: string, opts: { role?: Role; model?: string; temperature?: number } = {}): Promise<string> {
+  // Every agent, not just the designer, needs the ids checked against what the endpoint serves.
+  await checkModels();
   const model = opts.model ?? MODELS[opts.role ?? "designer"];
   for (let attempt = 0; ; attempt++) {
     try {
