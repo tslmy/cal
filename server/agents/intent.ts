@@ -91,7 +91,7 @@ Reply with JSON only: {"steps": [...]}. Each step is one of:
 A filter is {"from":"YYYY-MM-DD","to":"YYYY-MM-DD","titleContains"?,"category"?,"which"?:"all"|"next"}. It matches events overlapping from..to.
 Rules:
 1. Never invent event ids; describe what to change with a filter. Use "which":"next" when the person means one event ("move my dentist").
-2. Keep vagueness (precision): "around noon" -> "approximate" with start YYYY-MM-DDT12:00; a time given -> "exact"; a date without time -> "day" (start = end = date); "sometime next week" -> "week" spanning Mon-Sun; "sometime in May", "year 2 to year 4" (company year 1 is ${TODAY.slice(0, 4)}) -> "span" over the whole period. All-day events have date-only start and end (end inclusive).
+2. Keep vagueness (precision): "around", "about", "roughly", "-ish" or "or so" next to a time -> "approximate" ("around 7pm" -> start YYYY-MM-DDT19:00, precision "approximate"); a plain time -> "exact"; a date without time -> "day" (start = end = date); "sometime next week" -> "week" spanning Mon-Sun; "sometime in May", "year 2 to year 4" (company year 1 is ${TODAY.slice(0, 4)}) -> "span" over the whole period. All-day events have date-only start and end (end inclusive).
 3. Take every date from the list of the next two weeks above; never work out a weekday yourself. A bare weekday ("Monday", "on Thursday", "this Friday") is its first date after today in that list; "next <weekday>" is the one in the week starting ${addDays(mondayOf(TODAY), 7)}. "This weekend" or "my weekend" is ${SAT} to ${addDays(SAT, 1)}. "Next week" as a move target means shiftDays 7.
 4. Bulk wording ("empty out my weekend", "cancel everything Friday") is a delete with a date filter and no titleContains.
 5. A note or email can imply several operations: emit every delete, move and add it implies, e.g. "empty out my weekend for a business trip" is a delete of everything that weekend plus a create of an all-day "Business trip" spanning it.
@@ -434,6 +434,8 @@ export async function parseIntent(state: UserState, text: string, source: "typed
     }
   }
   steps ??= parseOffline(text, source);
+  // Models often mark "around 7pm" as exact. For one typed sentence the wording settles it.
+  if (source === "typed" && APPROX.test(text) && steps.length === 1 && steps[0].op === "create" && steps[0].precision === "exact") steps = [{ ...steps[0], precision: "approximate" }];
   const changeSet = resolve(state, steps, source);
   const quoted = text.length > 80 ? `${text.slice(0, 77).replace(/\s+/g, " ")}...` : text;
   trace.push({ role: "Intent", text: `Read "${quoted}" as ${steps.length} step${steps.length === 1 ? "" : "s"} (${steps.map((x) => x.op).join(", ") || "none"}); resolved to ${changeSet.ops.length} operation${changeSet.ops.length === 1 ? "" : "s"}${isLive() ? "" : " (offline parser)"}.` });
