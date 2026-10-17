@@ -82,7 +82,7 @@ function ReplayRequests({ progress, onStart, onStop }: { progress: { at: number;
         e.target.value = "";
         if (f) onStart((await f.text()).split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
       }} />
-      <p className="m-0 text-xs text-faint">One request per line. Each is typed into the box, sent and applied without review.</p>
+      <p className="m-0 text-xs text-faint">Empties this calendar first. One request per line; each is typed into the box, sent and applied without review.</p>
     </section>
   );
 }
@@ -93,6 +93,7 @@ export function DevTools({ open, onToggle, user, onUser, state, users, busy, onA
   progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void;
 }) {
   const reset = useAction(user, () => api(`/api/state/${user}/reset`, {}));
+  const qc = useQueryClient();
   if (!open)
     return (
       <button type="button" onClick={onToggle} aria-expanded={false}
@@ -118,7 +119,11 @@ export function DevTools({ open, onToggle, user, onUser, state, users, busy, onA
         </div>
       </section>
 
-      <ReplayRequests progress={progress} onStart={(lines) => onReplay({ lines })} onStop={onStop} />
+      <ReplayRequests progress={progress} onStop={onStop} onStart={async (lines) => {
+        await api(`/api/state/${user}/reset`, { blank: true });
+        await qc.invalidateQueries({ queryKey: stateKey(user) });
+        onReplay({ lines, fresh: true });
+      }} />
 
       {state && <Scrub user={user} state={state} progress={progress} onReplay={onReplay} onStop={onStop} />}
       {state && <ActivityPanel steps={state.activity} mode={state.mode} busy={busy} onAsk={onAsk} />}
