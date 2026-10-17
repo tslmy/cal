@@ -3,6 +3,8 @@ import { z } from "zod";
 import { isLive, structured } from "../llm";
 import { newId } from "../store";
 import { systemFor } from "../prompts";
+import { cached } from "../cache";
+import { MODELS } from "../models";
 import { addDays, daysBetween, mondayOf, MONTHS, TODAY, weekday } from "../../src/shared/dates";
 import { overlaps } from "../../src/shared/ops";
 import { fmtDate, fmtWhen } from "../../src/shared/when";
@@ -280,7 +282,11 @@ export async function parseIntent(state: UserState, text: string, source: "typed
   if (isLive()) {
     try {
       const prompt = `${source === "text" ? "Pasted text" : "Typed sentence"}:\n${text}\n\nTheir events near today (title | start | end | category):\n${eventsForPrompt(state)}`;
-      steps = (await structured(Plan, systemFor(CORE, state, "intent"), prompt, { role: "intent", temperature: 0.1 })).steps;
+      // The plan holds filters, not event ids, so the same words replay correctly against today's events.
+      const out = await cached([MODELS.intent, source, text.trim()], async () =>
+        (await structured(Plan, systemFor(CORE, state, "intent"), prompt, { role: "intent", temperature: 0.1 })).steps);
+      steps = out.value;
+      if (out.hit) trace.push({ role: "Intent", text: "Reused the cached plan for this text." });
     } catch (err) {
       trace.push({ role: "Intent", text: `Model failed (${(err as Error).message}); used the offline parser instead.` });
     }
