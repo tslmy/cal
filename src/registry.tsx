@@ -14,7 +14,7 @@ export const CalendarContext = createContext<Ctx>({ events: [], owner: new Map()
 
 // Every day, week and month on screen gets a stable layoutId, so Motion morphs it between any two views.
 // When two components in one view would render the same period, the finer-grained one owns the id.
-const PRIORITY: Record<string, number> = { WeekGrid: 4, MonthGrid: 3, WeekStrip: 2, YearBand: 1 };
+const PRIORITY: Record<string, number> = { WeekGrid: 4, NightGrid: 4, MonthGrid: 3, WeekStrip: 2, YearBand: 1 };
 
 function idsFor(type: string, p: Record<string, unknown>): string[] {
   switch (type) {
@@ -29,6 +29,8 @@ function idsFor(type: string, p: Record<string, unknown>): string[] {
       for (let w = mondayOf(first); w.slice(0, 7) <= String(p.month); w = addDays(w, 7)) ids.push(weekId(w));
       return ids;
     }
+    case "NightGrid":
+      return [weekId(mondayOf(String(p.weekOf)))];
     case "WeekStrip": {
       const y = Number(p.year);
       return Array.from({ length: weeksInIsoYear(y) }, (_, i) => weekId(mondayOfIsoWeek(y, i + 1)));
@@ -270,6 +272,82 @@ export const { registry } = defineRegistry(catalog, {
               {overflow.length ? overflow.map((e) => <Chip key={e.id} e={e} />) : <span>Nothing is scheduled there; anything that lands on those days shows up here.</span>}
             </div>
           )}
+        </motion.div>
+      );
+    },
+
+    NightGrid: ({ props }) => {
+      const { events, lid } = useCal("NightGrid");
+      const mon = mondayOf(props.weekOf);
+      const span = 24 - props.startHour + props.endHour;
+      const H = Math.max(36, TRACK / span);
+      const hm = (d: string, h: number) => `${d}T${String(h).padStart(2, "0")}:00`;
+      const mins = (t: string) => Date.parse(`${t.length > 10 ? t : `${t}T00:00`}:00Z`) / 60000;
+      const nights = DAY_KEYS.map((d, i) => {
+        const date = addDays(mon, i);
+        const from = hm(date, props.startHour);
+        const to = hm(addDays(date, 1), props.endHour);
+        const timed = events.filter((e) => e.start.length > 10 && e.start < to && e.end > from);
+        // Timed events that day outside the night, so nothing is hidden.
+        const day = events.filter((e) => e.start.length > 10 && day0(e) === date && !timed.includes(e));
+        const allDay = events.filter((e) => e.start.length <= 10 && on(e, date, date));
+        return { d, date, from, to, timed, day, allDay };
+      });
+      const w = isoWeek(mon);
+      return (
+        <motion.div layoutId={lid(weekId(mon))} className="overflow-hidden rounded-xl border border-line bg-[#14161B] text-[#E8EAED]">
+          <div className="flex items-baseline justify-between border-b border-[#2A2E35] px-4 py-3">
+            <span className="font-display text-lg font-semibold text-white">Nights of {MONTHS[Number(mon.slice(5, 7)) - 1]} {Number(mon.slice(8))}</span>
+            <span className="text-xs text-[#9AA1AC]">Week {w.week} · {fmtHour(props.startHour)} to {fmtHour(props.endHour)}</span>
+          </div>
+          <div className="flex border-b border-[#2A2E35]">
+            <div className="w-14 flex-none" />
+            {nights.map((n) => (
+              <div key={n.d} className="flex min-w-0 flex-1 basis-0 flex-col gap-1 overflow-hidden border-l border-[#2A2E35] px-2 py-1.5">
+                <span className="whitespace-nowrap text-xs font-semibold text-[#9AA1AC]">
+                  <span className="capitalize">{n.d}</span> <span className={`font-display text-base text-white ${n.date === TODAY ? "rounded bg-white px-1 text-ink" : ""}`}>{Number(n.date.slice(8))}</span>
+                  <span className="text-[#6B7280]"> → {DAY_KEYS[(DAY_KEYS.indexOf(n.d) + 1) % 7]}</span>
+                </span>
+                {n.allDay.map((e) => <Chip key={e.id} e={e} />)}
+              </div>
+            ))}
+          </div>
+          <div className="relative flex" style={{ height: span * H }}>
+            {Array.from({ length: span + 1 }, (_, k) => (
+              <div key={k} className="pointer-events-none absolute inset-x-0 border-t border-[#22262C]" style={{ top: k * H }}>
+                <span className="absolute left-0 w-14 pr-2 pt-0.5 text-right text-[11px] text-[#9AA1AC]">{k < span && fmtHour((props.startHour + k) % 24)}</span>
+              </div>
+            ))}
+            <div className="w-14 flex-none" />
+            {nights.map((n) => (
+              <div key={n.d} className="relative min-w-0 flex-1 basis-0 overflow-hidden border-l border-[#2A2E35]">
+                {n.timed.map((e) => {
+                  const a = Math.max(mins(e.start), mins(n.from));
+                  const b = Math.min(mins(e.end), mins(n.to));
+                  const top = ((a - mins(n.from)) / 60) * H;
+                  const height = ((b - a) / 60) * H;
+                  const c = colorFor(e.category);
+                  return (
+                    <div key={e.id} title={describe(e)} className={`absolute inset-x-1 flex overflow-hidden rounded-md px-1.5 ${height >= 40 ? "flex-col py-1" : "items-center gap-1.5"}`}
+                      style={{ top: top + 2, height: Math.max(height - 4, 14), ...fill(e), borderLeft: `3px ${isVague(e) ? "dashed" : "solid"} ${c.solid}` }}>
+                      <span className="truncate text-xs font-semibold leading-tight">{e.title}</span>
+                      <span className="flex-none text-[11px] leading-tight opacity-80">{e.start.slice(11, 16)} to {e.end.slice(11, 16)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <div className="flex border-t border-[#2A2E35]">
+            <div className="w-14 flex-none px-1 py-1.5 text-right text-[11px] text-[#9AA1AC]">Day</div>
+            {nights.map((n) => (
+              <div key={n.d} className="flex min-w-0 flex-1 basis-0 flex-col gap-1 overflow-hidden border-l border-[#2A2E35] px-1 py-1.5">
+                {n.day.map((e) => (
+                  <span key={e.id} title={describe(e)} className="truncate rounded px-1.5 py-0.5 text-[11px] font-medium" style={fill(e)}>{e.start.slice(11, 16)} {e.title}</span>
+                ))}
+              </div>
+            ))}
+          </div>
         </motion.div>
       );
     },

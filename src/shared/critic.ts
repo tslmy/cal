@@ -23,6 +23,10 @@ export function rangeOf(el: El): [string, string] | null {
       const mon = mondayOf(String(p.weekOf));
       return [mon, addDays(mon, 6)];
     }
+    case "NightGrid": {
+      const mon = mondayOf(String(p.weekOf));
+      return [mon, addDays(mon, 7)];
+    }
     case "WeekStrip": {
       const y = Number(p.year);
       return [mondayOfIsoWeek(y, 1), addDays(mondayOfIsoWeek(y, weeksInIsoYear(y)), 6)];

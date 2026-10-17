@@ -126,11 +126,11 @@ export const DEMO_PERSONAS: Persona[] = [
     },
     events: dev,
     tailored: {
-      title: "See your week from 8 AM to midnight, with the year below?",
-      reason: "13 of your events are overnight shifts that start at 7 PM, and the rotation changes week to week. A week running to midnight shows each shift's start; the 52-week strip shows the pattern and your vacation.",
+      title: "Lay out your week by night, 6 PM to 8 AM?",
+      reason: "13 of your events are overnight shifts, 7 PM to 7 AM, and the rotation changes week to week. One column per night shows each shift as a single block; the 52-week strip below shows the pattern and your vacation.",
       spec: { root: "s", elements: {
         s: { type: "Stack", props: { direction: "column", gap: "md" }, children: ["w", "y"] },
-        w: { type: "WeekGrid", props: { weekOf: "2026-10-26", days: [...DAY_KEYS], startHour: 8, endHour: 24 }, children: [] },
+        w: { type: "NightGrid", props: { weekOf: "2026-10-26", startHour: 18, endHour: 8 }, children: [] },
         y: { type: "WeekStrip", props: { year: 2026, label: "Shifts across the year" }, children: [] },
       } },
     },
@@ -143,12 +143,5 @@ export const DEMO_PERSONAS: Persona[] = [
       confidence: 0.8,
     },
     events: priya,
-    tailored: {
-      title: "Show this week from 9 AM to 9 PM?",
-      reason: "Almost all of your family's plans are timed between 9 AM and 9 PM, with practices and lessons repeating every week. An hour-by-hour week shows who needs to be where.",
-      spec: { root: "w", elements: {
-        w: { type: "WeekGrid", props: { weekOf: "2026-10-19", days: [...DAY_KEYS], startHour: 9, endHour: 21 }, children: [] },
-      } },
-    },
   },
 ];

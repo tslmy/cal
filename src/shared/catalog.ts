@@ -36,6 +36,15 @@ export const catalog = defineCatalog(schema, {
       description:
         "Hour-by-hour grid for one week with one column per listed day. Days left out are collapsed; any event on a collapsed day still appears in an overflow row.",
     },
+    NightGrid: {
+      props: z.object({
+        weekOf: z.string().describe("YYYY-MM-DD of the Monday"),
+        startHour: z.number().int().min(12).max(23).describe("evening hour each column starts at"),
+        endHour: z.number().int().min(1).max(12).describe("morning hour the next day each column ends at"),
+      }),
+      description:
+        "Hour-by-hour grid for night workers: one column per night of the week, from startHour in the evening at the top to endHour the next morning at the bottom, so an overnight shift is one unbroken block. Daytime events show as a count under each night.",
+    },
     WeekStrip: {
       props: z.object({
         year: z.number().int(),
