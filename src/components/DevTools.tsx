@@ -65,13 +65,13 @@ function ReplayPerson({ user, state, progress, onReplay, onStop }: { user: strin
         <button type="button" onClick={onStop} className={btn}>Stop ({progress.at} of {progress.of})</button>
       ) : (
         <button type="button" disabled={!has || loading} onClick={start} className={btn}>
-          {loading ? "Starting..." : weekly ? `Replay ${state.name}'s last 8 weeks` : `Replay ${state.name}'s requests`}
+          {loading ? "Starting..." : !has ? "Replay requests" : weekly ? `Replay ${state.name}'s last 8 weeks` : `Replay ${state.name}'s requests`}
         </button>
       )}
       <p className="m-0 text-xs text-faint">
         {has
           ? `Empties ${state.name}'s calendar and what I've learned, then sends ${weekly ? "their requests week by week" : `their ${file!.length} requests one by one`} while both grow back.`
-          : `No transcript of ${state.name}'s requests to replay.`}
+          : "No transcript of requests to replay for this person."}
       </p>
     </div>
   );
