@@ -12,10 +12,11 @@ export function learnedSection(state: UserState, agent: AgentName): string {
   return activePrompt(state, agent)?.learned.trim() ?? "";
 }
 
-export function systemFor(core: string, state: UserState, agent: AgentName): string {
-  const learned = learnedSection(state, agent);
+export function withLearned(core: string, learned: string): string {
   return learned ? `${core}\n\nABOUT THIS PERSON (learned; follow it unless it conflicts with the rules above):\n${learned}` : core;
 }
+
+export const systemFor = (core: string, state: UserState, agent: AgentName): string => withLearned(core, learnedSection(state, agent));
 
 export const promptVersionsUsed = (state: UserState): Record<string, number> =>
   Object.fromEntries(state.prompts.filter((p) => p.active).map((p) => [p.agent, p.version]));

@@ -1,6 +1,25 @@
 import type { TraceStep } from "../shared/types";
 
-const tint = (role: string) => (role === "Critic" ? "text-[#F29B9B]" : role.startsWith("Designer ") ? "text-[#8FD6C8]" : "text-[#F2B36B]");
+const TINTS: [RegExp, string][] = [
+  [/^Habit/, "text-[#B9A6F2]"],
+  [/^Meta/, "text-[#F2D16B]"],
+  [/^Designer/, "text-[#8FD6C8]"],
+  [/^Critic/, "text-[#F29B9B]"],
+  [/^Calendar/, "text-[#9CC3F2]"],
+];
+const tint = (role: string) => TINTS.find(([re]) => re.test(role))?.[1] ?? "text-[#F2B36B]";
+
+// Unified diff of a prompt rewrite, without the file headers.
+function Diff({ diff }: { diff: string }) {
+  const lines = diff.split("\n").filter((l) => !l.startsWith("---") && !l.startsWith("+++"));
+  return (
+    <pre className="m-0 mt-1.5 overflow-x-auto rounded-lg bg-[#0D0F13] p-2 font-mono text-[11px] leading-relaxed">
+      {lines.map((l, i) => (
+        <div key={i} className={l.startsWith("+") ? "bg-[#12301F] text-[#9BE3B4]" : l.startsWith("-") ? "bg-[#3A1717] text-[#F2A5A5]" : l.startsWith("@@") ? "text-faint" : "text-[#AEB4BD]"}>{l || " "}</div>
+      ))}
+    </pre>
+  );
+}
 
 // The whole agent loop as it runs (E9).
 export function ActivityPanel({ steps, mode, busy, onAsk }: { steps: TraceStep[]; mode: string; busy: boolean; onAsk: () => void }) {
@@ -14,7 +33,10 @@ export function ActivityPanel({ steps, mode, busy, onAsk }: { steps: TraceStep[]
         {[...steps].reverse().map((t, i) => (
           <li key={i} className="flex items-start gap-2.5">
             <span className={`min-w-20 flex-none rounded bg-[#262A31] px-1.5 py-0.5 text-center font-mono text-[11px] ${tint(t.role)}`}>{t.role}</span>
-            <span className="text-[13px] leading-snug text-[#D5D9DF]">{t.text}</span>
+            <div className="min-w-0 flex-1 text-[13px] leading-snug text-[#D5D9DF]">
+              {t.text}
+              {t.diff && <Diff diff={t.diff} />}
+            </div>
           </li>
         ))}
       </ol>

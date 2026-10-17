@@ -4,6 +4,7 @@ import { CalendarView } from "./components/CalendarView";
 import { SuggestionCard, ActiveChange } from "./components/SuggestionCard";
 import { LearnedPanel } from "./components/LearnedPanel";
 import { ActivityPanel } from "./components/ActivityPanel";
+import { PromptsPanel } from "./components/PromptsPanel";
 import { CommandBar } from "./components/CommandBar";
 import { ImportMenu } from "./components/ImportMenu";
 import { ViewSwitcher } from "./components/ViewSwitcher";
@@ -58,6 +59,7 @@ export default function App() {
                 {pending && <SuggestionCard proposal={pending} onAccept={() => react.mutate({ id: pending.id, action: "accept" })} onDismiss={() => react.mutate({ id: pending.id, action: "dismiss" })} />}
                 {active && <ActiveChange proposal={active} onRevert={() => react.mutate({ id: active.id, action: "revert" })} />}
                 <LearnedPanel user={user} state={s} />
+                <PromptsPanel user={user} state={s} />
                 <ActivityPanel steps={s.activity} mode={s.mode} busy={ask.isPending} onAsk={() => ask.mutate(undefined)} />
               </aside>
             </div>

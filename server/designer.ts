@@ -96,7 +96,7 @@ async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceS
     try {
       raw = crusoe
         ? parseJson(await callModel(system, userPrompt(p, req, issues, previous), { role: "designer", temperature: 0.4 + n * 0.25 }))
-        : mockDraft(p, req, n, round);
+        : mockDraft(p, req, n, round, system);
     } catch (err) {
       if (err instanceof ModelError) {
         trace.push({ role, text: err.message });
@@ -155,14 +155,15 @@ async function judge(p: Persona, drafts: { title: string; reason: string; spec: 
 
 // `system` is the designer's full prompt: the fixed core from systemPrompt() plus whatever the
 // meta-learner has written about this person (see prompts.ts).
-export async function design(p: Persona, req: DesignRequest, system: string = systemPrompt()): Promise<DesignResponse> {
+// `drafts` lets the meta-learner's replays run fewer drafts than a real proposal.
+export async function design(p: Persona, req: DesignRequest, system: string = systemPrompt(), drafts = DRAFTS): Promise<DesignResponse> {
   const trace: TraceStep[] = [];
   if (crusoe) for (const note of await checkModels()) if (/^(planner|designer)|Could not/.test(note)) trace.push({ role: "Designer", text: note });
-  trace.push({ role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${DRAFTS} draft designers${crusoe ? ` on ${MODELS.designer}` : " (offline mock: no CRUSOE_API_KEY)"}.` });
-  const drafts = await Promise.all(Array.from({ length: DRAFTS }, (_, n) => runDraft(n, p, req, trace, system)));
-  const good = drafts.filter((d): d is Extract<Draft, { spec: CalendarSpec }> => !!d && "spec" in d);
+  trace.push({ role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${drafts} draft designer${drafts > 1 ? "s" : ""}${crusoe ? ` on ${MODELS.designer}` : " (offline mock: no CRUSOE_API_KEY)"}.` });
+  const results = await Promise.all(Array.from({ length: drafts }, (_, n) => runDraft(n, p, req, trace, system)));
+  const good = results.filter((d): d is Extract<Draft, { spec: CalendarSpec }> => !!d && "spec" in d);
   if (!good.length) {
-    const none = drafts.find((d) => d && "none" in d);
+    const none = results.find((d) => d && "none" in d);
     trace.push({ role: "Designer", text: none ? "Nothing to suggest right now." : "No draft passed the checks. Keeping the current view." });
     return { mode: crusoe ? "live" : "mock", proposal: null, trace };
   }

@@ -1,6 +1,7 @@
 import type { CalendarSpec } from "../src/shared/catalog";
 import type { DesignRequest, Persona } from "../src/shared/types";
 import { mondayOf, TODAY } from "../src/shared/dates";
+import { mustShow } from "../src/shared/critic";
 
 // Offline stand-in for the model, used when no CRUSOE_API_KEY is set.
 // Some first drafts are deliberately flawed so the critic and repair loop have something to catch.
@@ -28,7 +29,7 @@ function hybrid(strips: number[], band: [number, number] | null): CalendarSpec {
   return { root: "root", elements };
 }
 
-export function mockDraft(p: Persona, req: DesignRequest, n: number, round: number): unknown {
+function habitDraft(p: Persona, req: DesignRequest, n: number, round: number): unknown {
   const types = Object.values(req.currentSpec.elements).map((e) => e.type);
   const week = Object.values(req.currentSpec.elements).find((e) => e.type === "WeekGrid");
   const fix = round > 0;
@@ -62,4 +63,26 @@ export function mockDraft(p: Persona, req: DesignRequest, n: number, round: numb
   if (n === 1 && !fix) return say("Try a view designed for you?", reason, hybrid([2027, 2028], null));
   if (n === 2 && !fix) return say("Try a view designed for you?", reason, hybrid([2026, 2027, 2028], [2027, 2029]));
   return say("Try a view designed for you?", reason, hybrid([2026, 2027, 2028], [2026, 2030]));
+}
+
+const CLASSIC = ["MonthGrid", "WeekGrid", "Stack", "Section"];
+const novel = (spec: CalendarSpec) => Object.values(spec.elements).some((e) => !CLASSIC.includes(e.type));
+
+// Plain month grids: this month plus the month each must-show plan starts in, so nothing is hidden.
+function classicDraft(p: Persona, req: DesignRequest): unknown {
+  const months = [TODAY.slice(0, 7)];
+  const shown = (e: { start: string; end: string }) => months.some((m) => e.start.slice(0, 7) <= m && e.end.slice(0, 7) >= m);
+  for (const e of [...mustShow(p.events)].sort((a, b) => a.start.localeCompare(b.start))) if (!shown(e)) months.push(e.start.slice(0, 7));
+  const spec: CalendarSpec = months.length === 1
+    ? one(leaf("MonthGrid", { month: months[0] }))
+    : { root: "root", elements: { root: { type: "Stack", props: { direction: "column", gap: "lg" }, children: months.map((m) => `m-${m}`) }, ...Object.fromEntries(months.map((m) => [`m-${m}`, leaf("MonthGrid", { month: m })])) } };
+  if (JSON.stringify(spec) === JSON.stringify(req.currentSpec)) return { proposal: null, why: "The plain month view already shows everything." };
+  const reason = `You undid invented views, so this sticks to plain month grids: this month plus the ${months.length - 1} month${months.length === 2 ? "" : "s"} where your longer plans start.`;
+  return { proposal: { title: "Show the months your plans fall in?", reason, spec } };
+}
+
+// The mock reads the learned section the way the model would: low novelty appetite means classic views only.
+export function mockDraft(p: Persona, req: DesignRequest, n: number, round: number, system = ""): unknown {
+  const draft = habitDraft(p, req, n, round) as { proposal?: { spec: CalendarSpec } | null };
+  return draft.proposal && novel(draft.proposal.spec) && /novelty appetite: low/i.test(system) ? classicDraft(p, req) : draft;
 }
