@@ -15,7 +15,11 @@ const heading = "m-0 text-xs font-semibold uppercase tracking-wider text-faint";
 // Starts this person over, then sends a sample person's last weeks through the chat box as
 // requests, applying each simulated week (and running the learner) after its last request.
 function Scrub({ user, state, progress, onReplay, onStop }: { user: string; state: ServerState; progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void }) {
-  const [who, setWho] = useState<(typeof REPLAYS)[number][0]>("jordan");
+  const [picked, setWho] = useState<(typeof REPLAYS)[number][0]>("jordan");
+  // A sample person replays their own history, so acting as Jordan always shows Jordan's weeks.
+  // Only someone without one (You, or a person built from a request file) borrows a sample's.
+  const own = REPLAYS.find(([id]) => id === user)?.[0];
+  const who = own ?? picked;
   const [loading, setLoading] = useState(false);
   const qc = useQueryClient();
   const name = REPLAYS.find(([id]) => id === who)![1];
@@ -50,10 +54,12 @@ function Scrub({ user, state, progress, onReplay, onStop }: { user: string; stat
     <section aria-label="Scrub time forward" className="flex flex-col gap-2">
       <h2 className={heading}>Scrub time forward</h2>
       <div className="flex gap-2">
-        <select aria-label="Sample person" value={who} onChange={(e) => setWho(e.target.value as typeof who)} disabled={busy}
-          className="min-h-10 rounded-lg border border-[#3A3F48] bg-ink px-2 text-sm text-white">
-          {REPLAYS.map(([id, n]) => <option key={id} value={id}>{n}</option>)}
-        </select>
+        {!own && (
+          <select aria-label="Sample person" value={who} onChange={(e) => setWho(e.target.value as typeof who)} disabled={busy}
+            className="min-h-10 rounded-lg border border-[#3A3F48] bg-ink px-2 text-sm text-white">
+            {REPLAYS.map(([id, n]) => <option key={id} value={id}>{n}</option>)}
+          </select>
+        )}
         {progress ? (
           <button type="button" onClick={onStop} className={`${btn} flex-1`}>Stop ({progress.at} of {progress.of})</button>
         ) : (
@@ -62,7 +68,9 @@ function Scrub({ user, state, progress, onReplay, onStop }: { user: string; stat
           </button>
         )}
       </div>
-      <p className="m-0 text-xs text-faint">Empties {state.name}'s calendar and what I've learned, then sends {name}'s requests week by week while both grow back.</p>
+      <p className="m-0 text-xs text-faint">
+        Empties {state.name}'s calendar and what I've learned, then sends {own ? "their" : `${name}'s`} requests week by week while both grow back.
+      </p>
     </section>
   );
 }
