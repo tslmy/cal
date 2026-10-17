@@ -14,7 +14,7 @@ const heading = "m-0 text-xs font-semibold uppercase tracking-wider text-faint";
 
 // Starts this person over, then sends a sample person's last weeks through the chat box as
 // requests, applying each simulated week (and running the learner) after its last request.
-function Scrub({ user, state, progress, onReplay }: { user: string; state: ServerState; progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void }) {
+function Scrub({ user, state, progress, onReplay, onStop }: { user: string; state: ServerState; progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void }) {
   const [who, setWho] = useState<(typeof REPLAYS)[number][0]>("jordan");
   const [loading, setLoading] = useState(false);
   const qc = useQueryClient();
@@ -52,9 +52,13 @@ function Scrub({ user, state, progress, onReplay }: { user: string; state: Serve
           className="min-h-10 rounded-lg border border-[#3A3F48] bg-ink px-2 text-sm text-white">
           {REPLAYS.map(([id, n]) => <option key={id} value={id}>{n}</option>)}
         </select>
-        <button type="button" disabled={busy} onClick={start} className={`${btn} flex-1`}>
-          {busy ? "Replaying..." : `Replay ${name}'s last 8 weeks`}
-        </button>
+        {progress ? (
+          <button type="button" onClick={onStop} className={`${btn} flex-1`}>Stop ({progress.at} of {progress.of})</button>
+        ) : (
+          <button type="button" disabled={busy} onClick={start} className={`${btn} flex-1`}>
+            {busy ? "Starting..." : `Replay ${name}'s last 8 weeks`}
+          </button>
+        )}
       </div>
       <p className="m-0 text-xs text-faint">Starts {state.name} over, then sends {name}'s requests week by week while the calendar and what I've learned grow.</p>
     </section>
@@ -116,7 +120,7 @@ export function DevTools({ open, onToggle, user, onUser, state, users, busy, onA
 
       <ReplayRequests progress={progress} onStart={(lines) => onReplay({ lines })} onStop={onStop} />
 
-      {state && <Scrub user={user} state={state} progress={progress} onReplay={onReplay} />}
+      {state && <Scrub user={user} state={state} progress={progress} onReplay={onReplay} onStop={onStop} />}
       {state && <ActivityPanel steps={state.activity} mode={state.mode} busy={busy} onAsk={onAsk} />}
     </aside>
   );
