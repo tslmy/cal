@@ -26,6 +26,8 @@ State is saved in `data/evolve.json`. To start everyone fresh, delete that file,
 
 To fast-forward a person, use **Replay requests** in the developer tools and pick a text file with one request per line (for example `samples/weekend-trip.txt`). Each line is typed into the box, sent as a chat bubble and applied without review, so the audience sees someone using the calendar at speed. Replayed sentences hit the replay cache, so a second run is instant even in live mode.
 
+Rosa (soft times), Dev (night shifts) and Priya (family logistics) start with the events their request files in `samples/` add up to, and with the view the live designer proposed for each in the persona run already turned on: Rosa's month with a year band, Dev's 8 AM to midnight week with a 52-week strip, Priya's 9 to 9 week. Pick them under **Act as**; **Undo** on the green card morphs back to the plain month.
+
 The view buttons (Month, Week, Work week, Work hours, Year, Years) morph too, and those switches are logged as signals.
 
 ## How it fits together

@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { JSONFilePreset } from "lowdb/node";
 import { PERSONAS } from "../src/shared/personas";
+import { DEMO_PERSONAS } from "../src/shared/demoPersonas";
 import { TODAY } from "../src/shared/dates";
 import type { CalendarSpec } from "../src/shared/catalog";
 import type { Belief, Interaction, InteractionKind, Persona, Source, TraceStep, UserState } from "../src/shared/types";
@@ -26,12 +27,13 @@ function seed(p: Persona): UserState {
   return {
     id: p.id, name: p.name, role: p.role,
     events: p.events.map((e) => ({ ...e, source: e.source ?? "sample" })),
-    interactions: [], beliefs, proposals: [], prompts: [], activity: [],
-    settings: { ...DEFAULT_SETTINGS }, spec: DAY_ONE, undo: [],
+    interactions: [], beliefs, prompts: [], activity: [],
+    settings: { ...DEFAULT_SETTINGS }, spec: p.tailored?.spec ?? DAY_ONE, undo: [],
+    proposals: p.tailored ? [{ id: `p-${p.id}-tailored`, ...p.tailored, status: "accepted", novel: true, previous: DAY_ONE, beliefKeys: beliefs.map((b) => b.key), at: now() }] : [],
   };
 }
 
-const SEEDS = [NEW_PERSON, ...PERSONAS];
+const SEEDS = [NEW_PERSON, ...PERSONAS, ...DEMO_PERSONAS];
 type Data = { users: Record<string, UserState> };
 
 const file = process.env.EVOLVE_DATA ?? "data/evolve.json";

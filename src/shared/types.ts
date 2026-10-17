@@ -143,6 +143,7 @@ export type Persona = {
   role: string;
   profile: Profile;
   events: CalEvent[];
+  tailored?: { title: string; reason: string; spec: CalendarSpec }; // a view already accepted at the start
 };
 
 // ---------- designer API ----------
