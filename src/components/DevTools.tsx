@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, useAction, type ServerState } from "../api";
 import { ActivityPanel } from "./ActivityPanel";
 
@@ -32,9 +32,32 @@ function Scrub({ user, state }: { user: string; state: ServerState }) {
   );
 }
 
-export function DevTools({ open, onToggle, user, onUser, state, users, busy, onAsk }: {
+// Types a text file into the sentence box one line at a time, as if the person sent each one.
+// Unlike Import > Text file, which reads the whole file as one previewed change.
+function ReplayRequests({ progress, onStart, onStop }: { progress: { at: number; of: number } | null; onStart: (lines: string[]) => void; onStop: () => void }) {
+  const file = useRef<HTMLInputElement>(null);
+  return (
+    <section aria-label="Replay requests" className="flex flex-col gap-2">
+      <h2 className={heading}>Replay requests</h2>
+      {progress ? (
+        <button type="button" onClick={onStop} className={`${btn} self-start`}>Stop ({progress.at} of {progress.of})</button>
+      ) : (
+        <button type="button" onClick={() => file.current?.click()} className={`${btn} self-start`}>Choose a text file</button>
+      )}
+      <input ref={file} type="file" hidden accept=".txt,text/plain" onChange={async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = "";
+        if (f) onStart((await f.text()).split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
+      }} />
+      <p className="m-0 text-xs text-faint">One request per line. Each is typed into the box, sent and applied without review.</p>
+    </section>
+  );
+}
+
+export function DevTools({ open, onToggle, user, onUser, state, users, busy, onAsk, progress, onReplay, onStop }: {
   open: boolean; onToggle: () => void; user: string; onUser: (id: string) => void; state?: ServerState;
   users: { id: string; name: string; role: string }[]; busy: boolean; onAsk: () => void;
+  progress: { at: number; of: number } | null; onReplay: (lines: string[]) => void; onStop: () => void;
 }) {
   const reset = useAction(user, () => api(`/api/state/${user}/reset`, {}));
   if (!open)
@@ -53,17 +76,16 @@ export function DevTools({ open, onToggle, user, onUser, state, users, busy, onA
 
       <section aria-label="Act as" className="flex flex-col gap-2">
         <h2 className={heading}>Act as</h2>
-        <div className="grid grid-cols-2 gap-2">
-          {users.map((p) => (
-            <button key={p.id} type="button" aria-pressed={p.id === user} onClick={() => onUser(p.id)}
-              className={`flex flex-col items-start rounded-lg border px-3 py-1.5 text-left text-sm leading-tight ${p.id === user ? "border-white bg-white text-ink" : "border-[#3A3F48] text-white hover:bg-[#262A31]"}`}>
-              <span className="font-semibold">{p.name}</span>
-              <span className={`text-xs ${p.id === user ? "text-muted" : "text-faint"}`}>{p.role}</span>
-            </button>
-          ))}
+        <div className="flex gap-2">
+          <select aria-label="Act as" value={user} onChange={(e) => onUser(e.target.value)} disabled={!!progress}
+            className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#3A3F48] bg-ink px-2 text-sm text-white">
+            {users.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
+          </select>
+        <button type="button" onClick={() => reset.mutate(undefined)} className={btn}>Start over</button>
         </div>
-        <button type="button" onClick={() => reset.mutate(undefined)} className={`${btn} self-start`}>Start {state?.name ?? "this person"} over</button>
       </section>
+
+      <ReplayRequests progress={progress} onStart={onReplay} onStop={onStop} />
 
       {state && <Scrub user={user} state={state} />}
       {state && <ActivityPanel steps={state.activity} mode={state.mode} busy={busy} onAsk={onAsk} />}

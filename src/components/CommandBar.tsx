@@ -9,8 +9,9 @@ import type { ChangeSet, EventDraft, Precision } from "../shared/types";
 
 // Natural-language event CRUD (P1 to P3): one sentence in, a previewed ChangeSet out.
 // A single new event shows as editable chips; anything else shows as a diff.
-// Sent sentences stay above the box as chat bubbles. "Replay" types a request file into the box
-// line by line and applies each result, to show a fast-forwarded person using the calendar.
+// Sent sentences stay above the box as chat bubbles. A replay (started from the developer tools)
+// types a request file into the box line by line and applies each result, to show a
+// fast-forwarded person using the calendar.
 
 const minutes = (hm: string) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -95,7 +96,11 @@ function ChatLog({ lines, onClear }: { lines: { id: number; text: string }[]; on
   );
 }
 
-export function CommandBar({ user, children }: { user: string; children?: React.ReactNode }) {
+export type Replay = { id: number; lines: string[] };
+
+export function CommandBar({ user, replay: request, onProgress, stop, children }: {
+  user: string; replay: Replay | null; onProgress: (p: { at: number; of: number } | null) => void; stop: React.RefObject<boolean>; children?: React.ReactNode;
+}) {
   const [text, setText] = useState("");
   // Tagged with the user it was parsed for, so switching users drops it.
   const [pending, setPending] = useState<{ user: string; cs: ChangeSet } | null>(null);
@@ -104,8 +109,6 @@ export function CommandBar({ user, children }: { user: string; children?: React.
   const [sent, setSent] = useState<{ id: number; user: string; text: string }[]>([]);
   const say = (t: string) => setSent((s) => [...s, { id: s.length ? s[s.length - 1].id + 1 : 0, user, text: t.trim() }]);
   const [replay, setReplay] = useState<{ at: number; of: number } | null>(null);
-  const stop = useRef(false);
-  const file = useRef<HTMLInputElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const parse = useAction(user, (t: string) => api<ChangeSet>(`/api/intent/${user}`, { text: t, source: "typed" }));
   const apply = useAction(user, (c: ChangeSet) => api(`/api/changes/${user}/apply`, c));
@@ -124,7 +127,7 @@ export function CommandBar({ user, children }: { user: string; children?: React.
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   // Switching people stops a replay meant for someone else.
-  useEffect(() => () => void (stop.current = true), [user]);
+  useEffect(() => () => void (stop.current = true), [user, stop]);
 
   const close = () => {
     setCs(null);
@@ -145,14 +148,14 @@ export function CommandBar({ user, children }: { user: string; children?: React.
     });
 
   // Types each line into the box, sends it as a bubble and applies what it parses to, unreviewed.
-  const play = async (f: File) => {
-    const lines = (await f.text()).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const play = async (lines: string[]) => {
     stop.current = false;
     setCs(null);
     let failed = 0;
     for (const [i, line] of lines.entries()) {
       if (stop.current) break;
       setReplay({ at: i + 1, of: lines.length });
+      onProgress({ at: i + 1, of: lines.length });
       const step = Math.min(18, 900 / line.length);
       for (let n = 1; n <= line.length && !stop.current; n++) {
         setText(line.slice(0, n));
@@ -171,9 +174,15 @@ export function CommandBar({ user, children }: { user: string; children?: React.
       await wait(250);
     }
     setReplay(null);
+    onProgress(null);
     setText("");
     if (failed) toast.error(`${failed} of ${lines.length} requests could not be applied`);
   };
+
+  useEffect(() => {
+    if (request) void play(request.lines);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per replay request
+  }, [request?.id]);
 
   const single = cs?.ops.length === 1 && cs.ops[0].op === "create" ? cs.ops[0].event : null;
   const busy = parse.isPending || !!replay;
@@ -221,17 +230,6 @@ export function CommandBar({ user, children }: { user: string; children?: React.
             {parse.isPending && !replay ? "Reading..." : "Send"}
           </button>
         </form>
-        {replay ? (
-          <button type="button" onClick={() => (stop.current = true)} className="min-h-11 rounded-xl border border-line-strong bg-white px-4 text-sm font-semibold">
-            Stop ({replay.at}/{replay.of})
-          </button>
-        ) : (
-          <button type="button" disabled={busy} onClick={() => file.current?.click()} title="Type a text file's lines in one by one, as if someone sent them"
-            className="min-h-11 rounded-xl border border-line-strong bg-white px-4 text-sm font-semibold disabled:text-muted">
-            Replay requests
-          </button>
-        )}
-        <input ref={file} type="file" hidden accept=".txt,text/plain" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void play(f); }} />
         {children}
       </div>
     </div>

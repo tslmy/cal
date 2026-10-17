@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, useAction, useUsers, useUserState } from "./api";
 import { CalendarView } from "./components/CalendarView";
 import { SuggestionCard, ActiveChange } from "./components/SuggestionCard";
 import { LearnedPanel } from "./components/LearnedPanel";
 import { DevTools } from "./components/DevTools";
 import { PromptsPanel } from "./components/PromptsPanel";
-import { CommandBar } from "./components/CommandBar";
+import { CommandBar, type Replay } from "./components/CommandBar";
 import { ImportMenu } from "./components/ImportMenu";
 import { ViewSwitcher } from "./components/ViewSwitcher";
 
@@ -25,6 +25,9 @@ export default function App() {
   const ask = useAction(user, () => api(`/api/design/${user}`, {}));
   const react = useAction(user, ({ id, action }: { id: string; action: "accept" | "dismiss" | "revert" }) => api(`/api/proposals/${user}/${id}/${action}`, {}));
   const [dev, setDev] = useDevToolsOpen();
+  const [replay, setReplay] = useState<Replay | null>(null);
+  const [progress, setProgress] = useState<{ at: number; of: number } | null>(null);
+  const stop = useRef(false);
 
   const pending = s?.proposals.find((p) => p.status === "suggested");
   const active = s?.proposals.filter((p) => p.status === "accepted").at(-1);
@@ -59,13 +62,14 @@ export default function App() {
 
             <div className={`fixed inset-x-0 bottom-0 z-20 border-t ${dev ? "lg:right-[380px]" : ""} border-line bg-subtle/90 px-4 pb-3 pt-2 backdrop-blur sm:px-6`}>
               <div className="mx-auto max-w-[1400px]">
-                <CommandBar user={user}><ImportMenu user={user} /></CommandBar>
+                <CommandBar user={user} replay={replay} onProgress={setProgress} stop={stop}><ImportMenu user={user} /></CommandBar>
               </div>
             </div>
           </>
         )}
       </div>
-      <DevTools open={dev} onToggle={() => setDev((o) => !o)} user={user} onUser={setUser} state={s} users={users} busy={ask.isPending} onAsk={() => ask.mutate(undefined)} />
+      <DevTools open={dev} onToggle={() => setDev((o) => !o)} user={user} onUser={setUser} state={s} users={users} busy={ask.isPending} onAsk={() => ask.mutate(undefined)}
+        progress={progress} onReplay={(lines) => setReplay((r) => ({ id: (r?.id ?? 0) + 1, lines }))} onStop={() => (stop.current = true)} />
     </div>
   );
 }
