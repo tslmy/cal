@@ -5,19 +5,33 @@ import { critique, mustShow, sharedPeriods } from "../src/shared/critic";
 import { daysBetween, isoWeek, mondayOf, TODAY } from "../src/shared/dates";
 import type { DesignRequest, DesignResponse, Persona, TraceStep } from "../src/shared/types";
 import { mockDraft } from "./mock";
-import { MODELS } from "./models";
+import { MODELS, resolveModels } from "./models";
 
 const DRAFTS = Number(process.env.DESIGNER_DRAFTS ?? 3);
 const REPAIRS = Number(process.env.DESIGNER_REPAIRS ?? 2);
-const MODEL = MODELS.designer;
+const BASE_URL = process.env.CRUSOE_BASE_URL ?? "https://api.inference.crusoecloud.com/v1";
 
 const crusoe = process.env.CRUSOE_API_KEY
-  ? createOpenAICompatible({
-      name: "crusoe",
-      baseURL: process.env.CRUSOE_BASE_URL ?? "https://api.inference.crusoecloud.com/v1",
-      apiKey: process.env.CRUSOE_API_KEY,
-    })
+  ? createOpenAICompatible({ name: "crusoe", baseURL: BASE_URL, apiKey: process.env.CRUSOE_API_KEY })
   : null;
+
+// Checked once per server start; a failed check is retried on the next request.
+let resolved: Promise<string[]> | null = null;
+function checkModels(): Promise<string[]> {
+  resolved ??= resolveModels(BASE_URL, process.env.CRUSOE_API_KEY!).catch((err) => {
+    resolved = null;
+    return [`Could not list models: ${(err as Error).message}`];
+  });
+  return resolved;
+}
+
+// An error from the API itself (wrong model, key or URL). Retrying the draft would not help.
+class ModelError extends Error {}
+function describe(err: unknown, model: string): string {
+  const e = err as { statusCode?: number; url?: string; responseBody?: string; message?: string };
+  const body = e.responseBody ? `: ${e.responseBody.replace(/\s+/g, " ").slice(0, 200)}` : e.message ? `: ${e.message}` : "";
+  return `Model call failed${e.statusCode ? ` (${e.statusCode})` : ""} for ${model}${e.url ? ` at ${e.url}` : ""}${body}`;
+}
 
 // The component list comes straight from the catalog, so the prompt never drifts from what the renderer supports.
 function componentDocs(): string {
@@ -94,7 +108,7 @@ function parseJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-async function callModel(system: string, prompt: string, temperature: number, model: string = MODEL): Promise<string> {
+async function callModel(system: string, prompt: string, temperature: number, model: string = MODELS.designer): Promise<string> {
   for (let attempt = 0; ; attempt++) {
     try {
       const { text } = await generateText({ model: crusoe!(model), system, prompt, temperature, maxOutputTokens: 6000 });
@@ -105,7 +119,7 @@ async function callModel(system: string, prompt: string, temperature: number, mo
         await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt + Math.random() * 500));
         continue;
       }
-      throw err;
+      throw new ModelError(describe(err, model));
     }
   }
 }
@@ -132,6 +146,10 @@ async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceS
         ? parseJson(await callModel(systemPrompt(), userPrompt(p, req, issues, previous), 0.4 + n * 0.25))
         : mockDraft(p, req, n, round);
     } catch (err) {
+      if (err instanceof ModelError) {
+        trace.push({ role, text: err.message });
+        return null;
+      }
       trace.push({ role, text: `Draft unreadable: ${(err as Error).message}` });
       issues = ["The reply was not a single valid JSON object."];
       previous = "(unreadable)";
@@ -184,9 +202,9 @@ async function judge(p: Persona, drafts: { title: string; reason: string; spec: 
 }
 
 export async function design(p: Persona, req: DesignRequest): Promise<DesignResponse> {
-  const trace: TraceStep[] = [
-    { role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${DRAFTS} draft designers${crusoe ? ` on ${MODEL}` : " (offline mock: no CRUSOE_API_KEY)"}.` },
-  ];
+  const trace: TraceStep[] = [];
+  if (crusoe) for (const note of await checkModels()) trace.push({ role: "Designer", text: note });
+  trace.push({ role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${DRAFTS} draft designers${crusoe ? ` on ${MODELS.designer}` : " (offline mock: no CRUSOE_API_KEY)"}.` });
   const drafts = await Promise.all(Array.from({ length: DRAFTS }, (_, n) => runDraft(n, p, req, trace)));
   const good = drafts.filter((d): d is Extract<Draft, { spec: CalendarSpec }> => !!d && "spec" in d);
   if (!good.length) {

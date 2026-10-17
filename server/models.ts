@@ -9,3 +9,35 @@ export const MODELS = {
   observer: process.env.MODEL_OBSERVER ?? "nvidia/nemotron-3.5-lightning-30b-a3b",
   router: process.env.MODEL_ROUTER ?? "nvidia/Nemotron-3-Nano-30B-A3B",
 };
+
+type Role = keyof typeof MODELS;
+const HINT: Record<Role, string> = { planner: "super", designer: "lightning", observer: "lightning", router: "nano" };
+// If the size-named model is missing, fall back to the next one that is likely there.
+const FALLBACK: Record<Role, string[]> = { planner: ["super", "ultra"], designer: ["lightning", "nano", "super"], observer: ["lightning", "nano", "super"], router: ["nano", "lightning"] };
+
+// Model IDs are case-sensitive and differ between accounts, so check them against /models once
+// and swap in the closest Nemotron the endpoint actually serves. Returns one note per change.
+export async function resolveModels(baseURL: string, apiKey: string): Promise<string[]> {
+  const res = await fetch(`${baseURL.replace(/\/$/, "")}/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  if (!res.ok) throw new Error(`GET ${baseURL}/models answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const ids = ((await res.json()) as { data?: { id: string }[] }).data?.map((m) => m.id) ?? [];
+  console.log(`[models] ${baseURL} serves: ${ids.join(", ") || "(none)"}`);
+  const notes: string[] = [];
+  for (const role of Object.keys(MODELS) as Role[]) {
+    const want = MODELS[role];
+    if (ids.includes(want)) continue;
+    const nemotron = ids.filter((id) => /nemotron/i.test(id));
+    const found =
+      ids.find((id) => id.toLowerCase() === want.toLowerCase()) ??
+      FALLBACK[role].map((h) => nemotron.find((id) => id.toLowerCase().includes(h))).find(Boolean) ??
+      nemotron[0];
+    if (!found) {
+      notes.push(`No Nemotron model on this endpoint for ${role} (wanted ${want}, ${HINT[role]} size).`);
+      continue;
+    }
+    MODELS[role] = found;
+    notes.push(`${role}: ${want} is not served here, using ${found}.`);
+  }
+  notes.forEach((n) => console.log(`[models] ${n}`));
+  return notes;
+}
