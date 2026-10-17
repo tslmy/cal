@@ -190,6 +190,18 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
     if (fresh) setSent((all) => all.filter((l) => l.user !== user)); // the person was started over
     setCs(null);
     let failed = 0;
+    // Stop shouldn't wait for a slow model call or a learner pass: the replay lets go of the request
+    // in flight (the server may still finish it) and ends right away.
+    const STOPPED = new Error("stopped");
+    const orStop = <T,>(work: Promise<T>) =>
+      new Promise<T>((resolve, reject) => {
+        let done = false;
+        work.then((v) => { done = true; resolve(v); }, (e) => { done = true; reject(e); });
+        void (async () => {
+          while (!done && !stop.current) await wait(100);
+          if (!done) reject(STOPPED);
+        })();
+      });
     for (const [i, line] of lines.entries()) {
       if (stop.current) break;
       setReplay({ at: i + 1, of: lines.length });
@@ -206,14 +218,15 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
       try {
         if (applyLine) {
           // A simulated week lands after its last request; everything sent so far is then read.
-          const s = await applyLine(i);
+          const s = await orStop(applyLine(i));
           if (s) mark((l) => l.user === user && l.status === "reading", { status: "read", ...through(s) });
         } else {
-          const c = await parse.mutateAsync(line);
+          const c = await orStop(parse.mutateAsync(line));
           mark([id], { status: "read" });
-          if (c.ops.length) mark([id], through(await apply.mutateAsync(c)));
+          if (c.ops.length) mark([id], through(await orStop(apply.mutateAsync(c))));
         }
-      } catch {
+      } catch (err) {
+        if (err === STOPPED) break;
         mark([id], { status: "failed" });
         failed++;
       }
