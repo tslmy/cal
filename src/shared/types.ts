@@ -126,6 +126,7 @@ export type UserState = {
   settings: Settings;
   spec: CalendarSpec; // the view on screen now
   undo: { changeSetId: string; ops: Operation[] }[]; // applied change sets, newest last
+  learnedThrough?: number; // how many interactions the habit learner's last finished pass had read
 };
 
 // ---------- sample personas (seed data) ----------

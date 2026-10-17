@@ -3,11 +3,11 @@ import { learn, type LearnResult } from "./agents/habit";
 import { proposeView } from "./routes/core";
 import type { InteractionKind, Proposal, UserState } from "../src/shared/types";
 
-// The adaptation loop (E8): the habit learner runs after every few interactions (debounced), right
+// The adaptation loop (E8): the habit learner runs after each interaction (debounced), right
 // after a reaction to a proposal, and on a timer. When a belief newly crosses the threshold, the
 // proposal gate (plain code) decides whether to ask the designer.
 
-const EVERY = 3;
+const EVERY = 1; // every change the person makes gets a pass (bursts share one via the debounce)
 const DEBOUNCE_MS = 1500;
 const TICK_MS = 60_000;
 const MUCH_STRONGER = 0.15; // P19: how much a relied-on belief must have grown to re-offer a rejected view

@@ -30,11 +30,13 @@ function Scrub({ user, state, progress, onReplay, onStop }: { user: string; stat
       let done = 0; // weeks applied so far
       const apply = async (i: number) => {
         // Applies every week whose last request has now been sent (empty weeks ride along).
+        let after: ServerState | undefined;
         while (done < weeks.length && (lastOf[done] <= i || i === lines.length - 1)) {
-          await api(`/api/learning/${user}/replay`, { persona: who, weeks: weeks.length, week: done });
+          after = await api(`/api/learning/${user}/replay`, { persona: who, weeks: weeks.length, week: done });
           done++;
           await qc.invalidateQueries({ queryKey: stateKey(user) });
         }
+        return after;
       };
       onReplay({ lines, apply, fresh: true });
     } catch (err) {

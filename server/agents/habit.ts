@@ -315,8 +315,12 @@ async function phrase(s: UserState, p: Plan): Promise<string | null> {
 export async function learn(userId: string, label?: string, now = Date.now()): Promise<LearnResult> {
   const s = getUser(userId);
   if (!s) throw new Error(`no such user: ${userId}`);
+  const read = s.interactions.length; // what this pass covers, for the chat's "learned" marks
   const p = plan(s, now);
-  if (!p.beliefs.length) return { changes: [], crossings: [] };
+  if (!p.beliefs.length) {
+    await update(userId, (st) => void (st.learnedThrough = Math.max(st.learnedThrough ?? 0, read)));
+    return { changes: [], crossings: [] };
+  }
   const warn = isLive() ? await phrase(s, p) : null;
   const seenLog = s.interactions.length;
   const th = s.settings.threshold;
@@ -350,6 +354,7 @@ export async function learn(userId: string, label?: string, now = Date.now()): P
       const prop = st.proposals.find((x) => x.id === pid);
       if (prop) prop.beliefConfidence = { ...conf, ...prop.beliefConfidence };
     }
+    st.learnedThrough = Math.max(st.learnedThrough ?? 0, read);
     return { changes: p.changes, crossings };
   });
 }

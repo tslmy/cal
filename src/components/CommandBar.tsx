@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { api, useAction } from "../api";
+import { api, useAction, useUserState, type ServerState } from "../api";
 import { ChangePreview } from "./ChangePreview";
 import { addDays, daysBetween, mondayOf } from "../shared/dates";
 import { PRECISIONS } from "../shared/when";
@@ -71,7 +71,22 @@ function DraftChips({ draft, onChange }: { draft: EventDraft; onChange: (e: Even
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function ChatLog({ lines, onClear }: { lines: { id: number; text: string }[]; onClear: () => void }) {
+// Each sent request carries a reaction, like a messenger app: a spinner while the intent agent reads
+// it, a check once it has, a pen once the habit learner has read the change it made into the log.
+type Sent = { id: number; user: string; text: string; status: "reading" | "read" | "failed" | "stopped"; through?: number };
+
+function Reaction({ line, learnedThrough }: { line: Sent; learnedThrough: number }) {
+  const learned = line.status === "read" && line.through !== undefined && learnedThrough >= line.through;
+  const label = { reading: "Reading", failed: "Couldn't read this", stopped: "Stopped before this was applied", read: learned ? "Read and learned from" : "Read" }[line.status];
+  return (
+    <span role="img" aria-label={label} title={label}
+      className="absolute -bottom-2.5 -left-2.5 flex size-6 items-center justify-center rounded-full border border-line bg-white text-xs shadow-sm">
+      {line.status === "reading" ? <span aria-hidden className="size-3 animate-spin rounded-full border-2 border-line-strong border-t-[#0B84FE]" /> : line.status === "failed" ? "⚠️" : line.status === "stopped" ? "⏹️" : learned ? "📝" : "✅"}
+    </span>
+  );
+}
+
+function ChatLog({ lines, learnedThrough, onClear }: { lines: Sent[]; learnedThrough: number; onClear: () => void }) {
   const end = useRef<HTMLLIElement>(null);
   // Braces matter: newer browsers return a Promise from scrollIntoView, and React would treat it as a cleanup.
   useEffect(() => {
@@ -79,13 +94,14 @@ function ChatLog({ lines, onClear }: { lines: { id: number; text: string }[]; on
   }, [lines.length]);
   return (
     <div className="relative">
-      <ol aria-label="Sent requests" className="m-0 flex h-36 list-none flex-col gap-1.5 overflow-y-auto p-0 pr-1">
+      <ol aria-label="Sent requests" className="m-0 flex h-36 list-none flex-col gap-3.5 overflow-y-auto p-0 pb-2.5 pr-1">
         {!lines.length && <li className="m-auto text-sm text-faint">Requests you send show up here</li>}
         <AnimatePresence initial={false}>
           {lines.map((l) => (
             <motion.li key={l.id} layout initial={{ opacity: 0, y: 12, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-              className="max-w-[75%] self-end rounded-2xl rounded-br-md bg-[#0B84FE] px-3.5 py-2 text-[15px] leading-snug text-white first:mt-auto">
+              className="relative max-w-[75%] self-end rounded-2xl rounded-br-md bg-[#0B84FE] px-3.5 py-2 text-[15px] leading-snug text-white first:mt-auto">
               {l.text}
+              <Reaction line={l} learnedThrough={learnedThrough} />
             </motion.li>
           ))}
         </AnimatePresence>
@@ -98,7 +114,8 @@ function ChatLog({ lines, onClear }: { lines: { id: number; text: string }[]; on
 
 // `apply`, when given, replaces parsing: the time scrub sends its own requests and applies each
 // simulated week itself once its last line is sent.
-export type Replay = { id: number; lines: string[]; apply?: (i: number) => Promise<void>; fresh?: boolean };
+// It resolves to the person's state when it applied something, so the lines sent so far are marked read.
+export type Replay = { id: number; lines: string[]; apply?: (i: number) => Promise<ServerState | undefined>; fresh?: boolean };
 
 export function CommandBar({ user, replay: request, onProgress, stop, children }: {
   user: string; replay: Replay | null; onProgress: (p: { at: number; of: number } | null) => void; stop: React.RefObject<boolean>; children?: React.ReactNode;
@@ -108,8 +125,19 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
   const [pending, setPending] = useState<{ user: string; cs: ChangeSet } | null>(null);
   const cs = pending?.user === user ? pending.cs : null;
   const setCs = (c: ChangeSet | null) => setPending(c && { user, cs: c });
-  const [sent, setSent] = useState<{ id: number; user: string; text: string }[]>([]);
-  const say = (t: string) => setSent((s) => [...s, { id: s.length ? s[s.length - 1].id + 1 : 0, user, text: t.trim() }]);
+  const [sent, setSent] = useState<Sent[]>([]);
+  const nextId = useRef(0);
+  const say = (t: string) => {
+    const id = nextId.current++;
+    setSent((s) => [...s, { id, user, text: t.trim(), status: "reading" }]);
+    return id;
+  };
+  const mark = (ids: number[] | ((l: Sent) => boolean), patch: Partial<Sent>) =>
+    setSent((s) => s.map((l) => ((typeof ids === "function" ? ids(l) : ids.includes(l.id)) ? { ...l, ...patch } : l)));
+  // Where the change a request made ends in the log; the learner has read it once it gets this far.
+  const through = (s: ServerState) => ({ through: s.interactions.length });
+  const learnedThrough = useUserState(user).data?.learnedThrough ?? 0;
+  const [asked, setAsked] = useState<number | null>(null); // the request behind the preview on screen
   const [replay, setReplay] = useState<{ at: number; of: number } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const parse = useAction(user, (t: string) => api<ChangeSet>(`/api/intent/${user}`, { text: t, source: "typed" }));
@@ -137,12 +165,17 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
   };
   const submit = () => {
     if (!text.trim() || parse.isPending || replay) return;
-    say(text);
-    parse.mutate(text, { onSuccess: (c) => { setText(""); setCs(c); }, onError: (err) => toast.error(err.message) });
+    const id = say(text);
+    setAsked(id);
+    parse.mutate(text, {
+      onSuccess: (c) => { setText(""); setCs(c); mark([id], { status: "read" }); },
+      onError: (err) => { mark([id], { status: "failed" }); toast.error(err.message); },
+    });
   };
   const confirm = (c: ChangeSet) =>
     apply.mutate(c, {
-      onSuccess: () => {
+      onSuccess: (s) => {
+        if (asked !== null) mark([asked], through(s));
         close();
         toast.success(c.summary, { action: { label: "Undo", onClick: () => undo.mutate(c.id, { onSuccess: () => toast("Undone"), onError: (err) => toast.error(err.message) }) } });
       },
@@ -167,18 +200,24 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
       if (stop.current) break;
       await wait(150);
       setText("");
-      say(line);
+      const id = say(line);
       try {
-        if (applyLine) await applyLine(i);
-        else {
+        if (applyLine) {
+          // A simulated week lands after its last request; everything sent so far is then read.
+          const s = await applyLine(i);
+          if (s) mark((l) => l.user === user && l.status === "reading", { status: "read", ...through(s) });
+        } else {
           const c = await parse.mutateAsync(line);
-          if (c.ops.length) await apply.mutateAsync(c);
+          mark([id], { status: "read" });
+          if (c.ops.length) mark([id], through(await apply.mutateAsync(c)));
         }
       } catch {
+        mark([id], { status: "failed" });
         failed++;
       }
       await wait(250);
     }
+    mark((l) => l.user === user && l.status === "reading", { status: "stopped" }); // a stopped scrub's unapplied week
     setReplay(null);
     onProgress(null);
     setText("");
@@ -216,7 +255,7 @@ export function CommandBar({ user, replay: request, onProgress, stop, children }
         </div>
       )}
 
-      <ChatLog lines={sent.filter((l) => l.user === user)} onClear={() => setSent((s) => s.filter((l) => l.user !== user))} />
+      <ChatLog lines={sent.filter((l) => l.user === user)} learnedThrough={learnedThrough} onClear={() => setSent((s) => s.filter((l) => l.user !== user))} />
 
       <div className="flex flex-wrap items-center gap-2">
         <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="flex min-w-0 flex-[1_1_420px] gap-2">
