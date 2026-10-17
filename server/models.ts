@@ -3,17 +3,19 @@
 // planner: lead critic that picks among passing drafts (and the future planner agent)
 // designer: the parallel draft designers
 // observer: the future habit agent; router: small high-volume calls
+// intent: turns sentences and pasted notes into calendar operations
 export const MODELS = {
   planner: process.env.MODEL_PLANNER ?? "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B",
   designer: process.env.MODEL_DESIGNER ?? "nvidia/Nemotron-3.5-Lightning-30B-A3B",
   observer: process.env.MODEL_OBSERVER ?? "nvidia/Nemotron-3.5-Lightning-30B-A3B",
   router: process.env.MODEL_ROUTER ?? "nvidia/Nemotron-3-Nano-30B-A3B",
+  intent: process.env.MODEL_INTENT ?? "openai/gpt-oss-120b",
 };
 
 type Role = keyof typeof MODELS;
-const HINT: Record<Role, string> = { planner: "super", designer: "lightning", observer: "lightning", router: "nano" };
+const HINT: Record<Role, string> = { planner: "super", designer: "lightning", observer: "lightning", router: "nano", intent: "super" };
 // If the size-named model is missing, fall back to the next one that is likely there.
-const FALLBACK: Record<Role, string[]> = { planner: ["super", "ultra"], designer: ["lightning", "nano", "super"], observer: ["lightning", "nano", "super"], router: ["nano", "lightning"] };
+const FALLBACK: Record<Role, string[]> = { planner: ["super", "ultra"], designer: ["lightning", "nano", "super"], observer: ["lightning", "nano", "super"], router: ["nano", "lightning"], intent: ["super", "lightning", "nano"] };
 
 // Model IDs are case-sensitive and differ between accounts, so check them against /models once
 // and swap in the closest Nemotron the endpoint actually serves. Returns one note per change.
