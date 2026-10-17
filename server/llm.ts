@@ -93,9 +93,11 @@ export async function callModel(system: string, prompt: string, opts: { role?: R
         extras = false;
         continue;
       }
-      if (attempt < 4 && (e.statusCode === 429 || e.statusCode === 503)) {
+      // Crusoe's limit is shared and bursty (several 429s in a row, then room again), so keep
+      // trying for about 90 seconds before giving up on the call.
+      if (attempt < 6 && (e.statusCode === 429 || e.statusCode === 503)) {
         const after = Number(e.responseHeaders?.["retry-after"]);
-        await new Promise((r) => setTimeout(r, after > 0 ? after * 1000 : 2000 * 2 ** attempt + Math.random() * 1000));
+        await new Promise((r) => setTimeout(r, after > 0 ? after * 1000 : Math.min(30000, 2000 * 2 ** attempt) + Math.random() * 1000));
         continue;
       }
       throw new ModelError(describe(err, model));
