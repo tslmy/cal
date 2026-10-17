@@ -44,13 +44,12 @@ function cite(p: Persona, re: RegExp, fallback: string): string {
   return facts.length ? `${facts.slice(0, 2).join(". ")}.` : fallback;
 }
 
-function habitDraft(p: Persona, req: DesignRequest, n: number, round: number): unknown {
+function habitDraft(p: Persona, req: DesignRequest, n: number, round: number, who = script(p)): unknown {
   const types = Object.values(req.currentSpec.elements).map((e) => e.type);
   const week = Object.values(req.currentSpec.elements).find((e) => e.type === "WeekGrid");
   const fix = round > 0;
   const say = (title: string, reason: string, spec: CalendarSpec) => ({ proposal: { title, reason, spec } });
 
-  const who = script(p);
   if (!who) return { proposal: null, why: "Not enough learned habits yet." };
 
   if (who === "mina") {
@@ -102,6 +101,14 @@ function classicDraft(p: Persona, req: DesignRequest): unknown {
 
 // The mock reads the learned section the way the model would: low novelty appetite means classic views only.
 export function mockDraft(p: Persona, req: DesignRequest, n: number, round: number, system = ""): unknown {
-  const draft = habitDraft(p, req, n, round) as { proposal?: { spec: CalendarSpec } | null };
+  // Like the model, don't repeat a view the person turned down: try the next script that fits instead.
+  const declined = new Set(req.history.filter((h) => h.status === "dismissed" || h.status === "undone").map((h) => h.title));
+  const first = script(p);
+  type Out = { proposal?: { title: string; spec: CalendarSpec } | null };
+  let draft = habitDraft(p, req, n, round, first) as Out;
+  for (const who of ["sam", "mina", "jordan"].filter((w) => first && w !== first)) {
+    if (!draft.proposal || !declined.has(draft.proposal.title)) break;
+    draft = habitDraft(p, req, n, round, who) as Out;
+  }
   return draft.proposal && novel(draft.proposal.spec) && /novelty appetite: low/i.test(system) ? classicDraft(p, req) : draft;
 }

@@ -12,7 +12,7 @@ import type { Belief, CalEvent, Interaction, InteractionKind, UserState } from "
 const ROLE = "Habit learner";
 const EVENT_KINDS: InteractionKind[] = ["create", "update", "delete", "import"];
 const SCALES = ["day", "week", "month", "quarter", "year"] as const;
-const REVERT = -0.25; // P10: revert is a strong negative
+const REVERT = -0.15; // P10: revert is a strong negative
 const DISMISS = -0.08; // dismiss a weak one
 const KEEP = 0.05; // keeping an accepted view a positive one
 const KEEP_MINUTES = 5;
@@ -191,7 +191,7 @@ function plan(s: UserState, now: number): Plan {
     if (c && fresh.length) {
       const reverts = reactions.filter((r) => r.kind === "proposal_reverted").length;
       const dismisses = reactions.filter((r) => r.kind === "proposal_dismissed").length;
-      const penalty = Math.max(0.5, 1 - 0.15 * reverts - 0.05 * dismisses);
+      const penalty = Math.max(0.5, 1 - 0.1 * reverts - 0.05 * dismisses);
       const amount = c.weeks === undefined ? 1 - Math.exp(-relevant.length / 5) : (1 - Math.exp(-c.weeks / 4)) * Math.min(1, relevant.length / 6);
       const target = Math.max(0, 0.95 * c.consistency * amount * penalty);
       if (prev && contradicts(key, prev.value, c.value)) {
