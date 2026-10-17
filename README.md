@@ -12,17 +12,17 @@ cp .env.example .env   # add CRUSOE_API_KEY for live models; leave empty for off
 npm run dev            # web on :5173, agents on :8787
 ```
 
-State is saved in `data/evolve.json`. To start everyone fresh, delete that file, or press **Start over** to reset one person.
+State is saved in `data/evolve.json`. To start everyone fresh, delete that file, or press **Start over** in the developer tools to reset one person.
 
 ## Demo (about 3 minutes, works offline)
 
-1. Pick **You** (a new person with no events and nothing learned).
+1. In **Developer tools** (the dark sidebar on the right; collapse it with ×), act as **You**, a new person with no events and nothing learned.
 2. Type `lunch with Ana Thursday around noon`, check the fields, and press Enter. The time is stored as approximate and drawn with a dashed edge.
 3. Type `dentist tomorrow 10am`, then `empty out my weekend for a business trip`. The preview lists what will be removed and added. Apply it, then use **Undo** on the toast.
 4. **Import → Calendar file**: `samples/team-offsite.ics`. Import it again: nothing new is added. **Import → Text file**: `samples/weekend-trip.txt` produces moves and removals, not just additions.
-5. In "What I've learned", choose Sam and press **Replay**. Eight simulated weeks feed the log, beliefs grow, one crosses 0.70, and a suggestion appears that cites the habit with its number.
+5. In the developer tools under "Scrub time forward", choose Sam and press **Replay**. Eight simulated weeks feed the log, beliefs grow, one crosses 0.70, and a suggestion appears that cites the habit with its number.
 6. Press **Try it** and the view morphs. Press **Undo** and it morphs back. Ask the designer again, try the second invented view, and undo it too.
-7. The meta-learner lowers novelty appetite, rewrites the designer's learned section (the diff shows in Agent activity, and every version is listed under "What each agent is told"), and the next suggestion is a plain month view.
+7. The meta-learner lowers novelty appetite, rewrites the designer's learned section (the diff shows in Agent activity in the developer tools, and every version is listed under "What each agent is told"), and the next suggestion is a plain month view.
 
 To fast-forward a person, press **Replay requests** next to the sentence box and pick a text file with one request per line (for example `samples/weekend-trip.txt`). Each line is typed into the box, sent as a chat bubble and applied without review, so the audience sees someone using the calendar at speed. Replayed sentences hit the replay cache, so a second run is instant even in live mode.
 
@@ -56,6 +56,7 @@ sentence / file ─▶ intent parser / importer ─▶ change set (preview, appl
 - **Prompts** (`server/prompts.ts`): each agent's system prompt is a fixed core followed by a learned "About this person" section. Only the meta-learner writes the learned part, and the core stays byte-identical so the prefix cache still hits. Each rewrite is stored as a version with its diff, reason and evidence. It is replayed against the person and the sample personas before adoption, and rolled back automatically after two reverts of proposals made under it.
 - **Model calls** (`server/llm.ts`): JSON validated with Zod and retried with the validation error. Each model has its own queue under Crusoe's per-model rate limit, with backoff on 429 and 503.
 - **Replay cache** (`server/cache.ts`): the intent parser's live answers are cached in `cache/llm.json`, keyed by model, source and the exact text. Re-running the same sentences or text files is instant, which helps when fast-forwarding a demo. The cache stores plans with filters rather than event ids, so a replayed plan still resolves against the current events. Set `LLM_CACHE=0` to turn it off, or delete the file to start over.
+- **Developer tools** (`src/components/DevTools.tsx`): the demo-only controls (who you act as, time scrubbing, the agent trace) sit in a collapsible sidebar outside the calendar spec, so the designer can never propose changes to them.
 - **State** (`server/store.ts`): one JSON file via lowdb, holding events, the interaction log, beliefs, proposals, prompt versions and activity.
 - **Views** (`src/shared/catalog.ts`, `src/registry.tsx`): json-render specs over six building blocks. Every day, week and month has a stable Motion `layoutId`, so any two views morph, including ones the designer invents. No view hides an event: anything filtered out shows up as an overflow marker.
 

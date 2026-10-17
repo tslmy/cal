@@ -24,9 +24,9 @@ function Diff({ diff }: { diff: string }) {
 // The whole agent loop as it runs (E9).
 export function ActivityPanel({ steps, mode, busy, onAsk }: { steps: TraceStep[]; mode: string; busy: boolean; onAsk: () => void }) {
   return (
-    <section aria-label="Agent activity" className="flex max-h-[32rem] flex-col gap-3 rounded-2xl bg-ink p-4 text-[#E8EAED]">
+    <section aria-label="Agent activity" className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="m-0 font-display text-base font-semibold text-white">Agent activity</h2>
+        <h2 className="m-0 text-xs font-semibold uppercase tracking-wider text-faint">Agent activity</h2>
         <span className="font-mono text-[11px] text-faint">{busy ? "working..." : mode === "mock" ? "offline mock" : "live"}</span>
       </div>
       <ol className="m-0 flex min-h-0 flex-1 list-none flex-col-reverse gap-2.5 overflow-y-auto p-0">

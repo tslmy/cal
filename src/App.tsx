@@ -1,13 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, useAction, useUsers, useUserState } from "./api";
 import { CalendarView } from "./components/CalendarView";
 import { SuggestionCard, ActiveChange } from "./components/SuggestionCard";
 import { LearnedPanel } from "./components/LearnedPanel";
-import { ActivityPanel } from "./components/ActivityPanel";
+import { DevTools } from "./components/DevTools";
 import { PromptsPanel } from "./components/PromptsPanel";
 import { CommandBar } from "./components/CommandBar";
 import { ImportMenu } from "./components/ImportMenu";
 import { ViewSwitcher } from "./components/ViewSwitcher";
+
+// Whether the developer tools sidebar is open, remembered per browser.
+const KEY = "evolve.devtools";
+const remembered = () => { try { return localStorage.getItem(KEY) !== "closed"; } catch { return true; } };
+function useDevToolsOpen() {
+  const [open, setOpen] = useState(remembered);
+  useEffect(() => { try { localStorage.setItem(KEY, open ? "open" : "closed"); } catch { /* private window */ } }, [open]);
+  return [open, setOpen] as const;
+}
 
 export default function App() {
   const [user, setUser] = useState("you");
@@ -15,28 +24,18 @@ export default function App() {
   const { data: s, error } = useUserState(user);
   const ask = useAction(user, () => api(`/api/design/${user}`, {}));
   const react = useAction(user, ({ id, action }: { id: string; action: "accept" | "dismiss" | "revert" }) => api(`/api/proposals/${user}/${id}/${action}`, {}));
-  const reset = useAction(user, () => api(`/api/state/${user}/reset`, {}));
+  const [dev, setDev] = useDevToolsOpen();
 
   const pending = s?.proposals.find((p) => p.status === "suggested");
   const active = s?.proposals.filter((p) => p.status === "accepted").at(-1);
 
   return (
-    <div className="min-h-screen px-4 pb-64 pt-6 sm:px-6">
+    <div className={`min-h-screen px-4 pb-64 pt-6 sm:px-6 ${dev ? "lg:pr-[404px]" : ""}`}>
       <div className="mx-auto flex max-w-[1400px] flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="font-display text-2xl font-bold tracking-tight">Evolve</div>
             <div className="text-sm text-muted">A calendar that redesigns itself around how you plan</div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Choose a user">
-            {users.map((p) => (
-              <button key={p.id} type="button" aria-pressed={p.id === user} onClick={() => setUser(p.id)}
-                className={`flex min-h-11 flex-col items-start rounded-xl border px-3.5 py-1.5 text-left text-sm leading-tight ${p.id === user ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                <span className="font-semibold">{p.name}</span>
-                <span className={`text-xs ${p.id === user ? "text-line-strong" : "text-muted"}`}>{p.role}</span>
-              </button>
-            ))}
-            <button type="button" onClick={() => reset.mutate(undefined)} className="min-h-11 rounded-xl border border-line-strong bg-white px-3.5 text-sm">Start over</button>
           </div>
         </header>
 
@@ -55,11 +54,10 @@ export default function App() {
                 {active && <ActiveChange proposal={active} onRevert={() => react.mutate({ id: active.id, action: "revert" })} />}
                 <LearnedPanel user={user} state={s} />
                 <PromptsPanel user={user} state={s} />
-                <ActivityPanel steps={s.activity} mode={s.mode} busy={ask.isPending} onAsk={() => ask.mutate(undefined)} />
               </aside>
             </div>
 
-            <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-subtle/90 px-4 pb-3 pt-2 backdrop-blur sm:px-6">
+            <div className={`fixed inset-x-0 bottom-0 z-20 border-t ${dev ? "lg:right-[380px]" : ""} border-line bg-subtle/90 px-4 pb-3 pt-2 backdrop-blur sm:px-6`}>
               <div className="mx-auto max-w-[1400px]">
                 <CommandBar user={user}><ImportMenu user={user} /></CommandBar>
               </div>
@@ -67,6 +65,7 @@ export default function App() {
           </>
         )}
       </div>
+      <DevTools open={dev} onToggle={() => setDev((o) => !o)} user={user} onUser={setUser} state={s} users={users} busy={ask.isPending} onAsk={() => ask.mutate(undefined)} />
     </div>
   );
 }
