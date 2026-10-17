@@ -45,6 +45,7 @@ export type InteractionKind =
   | "view_switch"
   | "proposal_shown" | "proposal_accepted" | "proposal_dismissed" | "proposal_reverted"
   | "belief_deleted"
+  | "prompt_rollback"
   | "dwell"; // time spent in a view
 
 export type Interaction = {

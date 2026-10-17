@@ -3,13 +3,14 @@ import core from "./routes/core";
 import intent from "./routes/intent";
 import imports from "./routes/imports";
 import learning from "./routes/learning";
+import prompts from "./routes/prompts";
 import { startLoop } from "./loop";
 import { startMetaLoop } from "./agents/meta";
 import { isLive } from "./llm";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
-for (const register of [core, intent, imports, learning]) register(app);
+for (const register of [core, intent, imports, learning, prompts]) register(app);
 startLoop();
 startMetaLoop();
 
