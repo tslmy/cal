@@ -14,12 +14,16 @@ const db = await JSONFilePreset<Record<string, unknown>>(file, {});
 const keyOf = (parts: unknown[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 32);
 
 // Returns the cached answer for these key parts, or runs `make`, stores and returns its answer.
-export async function cached<T>(parts: unknown[], make: () => Promise<T>): Promise<{ value: T; hit: boolean }> {
-  const key = keyOf(parts);
-  if (enabled && key in db.data) return { value: db.data[key] as T, hit: true };
+// `fallbacks` are looser keys tried in order when the exact one misses, so answers made under an
+// older model or prompt still replay instead of spending tokens again. The answer is stored under
+// the exact key and the first fallback.
+export async function cached<T>(parts: unknown[], make: () => Promise<T>, fallbacks: unknown[][] = []): Promise<{ value: T; hit: boolean }> {
+  if (enabled) {
+    for (const k of [parts, ...fallbacks].map(keyOf)) if (k in db.data) return { value: db.data[k] as T, hit: true };
+  }
   const value = await make();
   if (enabled) {
-    db.data[key] = value;
+    for (const k of [parts, ...fallbacks.slice(0, 1)].map(keyOf)) db.data[k] = value;
     await db.write();
   }
   return { value, hit: false };

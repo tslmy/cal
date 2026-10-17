@@ -364,9 +364,11 @@ export async function parseIntent(state: UserState, text: string, source: "typed
       const prompt = `${source === "text" ? "Pasted text" : "Typed sentence"}:\n${text}\n\nTheir events near today (title | start | end | category):\n${eventsForPrompt(state)}`;
       const system = systemFor(CORE, state, "intent");
       // The plan holds filters, not event ids, so the same words replay correctly against today's
-      // events. A changed system prompt (new rules, or a meta-learner rewrite) misses the cache.
+      // events. An exact hit needs the same model and prompt; failing that, any earlier plan for the
+      // same words is reused, including ones cached under the gpt-oss model used before.
       const out = await cached([MODELS.intent, source, text.trim(), system], async () =>
-        (await structured(Plan, system, prompt, { role: "intent", temperature: 0.1 })).steps);
+        (await structured(Plan, system, prompt, { role: "intent", temperature: 0.1 })).steps,
+        [[source, text.trim()], ["openai/gpt-oss-120b", source, text.trim()]]);
       steps = out.value;
       if (out.hit) trace.push({ role: "Intent", text: "Reused the cached plan for this text." });
     } catch (err) {
