@@ -5,30 +5,39 @@ import { api, stateKey, useAction, type ServerState } from "../api";
 import type { Replay } from "./CommandBar";
 import { ActivityPanel } from "./ActivityPanel";
 
-// Demo-only controls, docked like a browser's developer tools: who we're acting as, time scrubbing
-// and the agent trace. It lives outside the calendar spec, so the designer never sees or changes it.
+// Demo-only controls, docked like a browser's developer tools: who we're acting as and replaying
+// their requests, replaying any request file, and the agent trace. It lives outside the calendar spec, so the designer never sees or changes it.
 
-const REPLAYS = [["jordan", "Jordan"], ["mina", "Mina"], ["sam", "Sam"]] as const;
+// Who has a transcript of their requests to replay: Jordan, Mina and Sam as weeks of sentences made
+// from their sample history, Rosa, Dev and Priya as the request files they were built from.
+const WEEKLY = ["jordan", "mina", "sam"];
+const FILES: Record<string, string> = import.meta.glob("../../samples/*.txt", { query: "?raw", import: "default", eager: true });
+const transcriptOf = (id: string) => FILES[`../../samples/${id}.txt`]?.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 const btn = "min-h-10 rounded-lg border border-[#3A3F48] px-3 text-sm text-white hover:bg-[#262A31] disabled:opacity-50";
 const heading = "m-0 text-xs font-semibold uppercase tracking-wider text-faint";
 
-// Starts this person over, then sends a sample person's last weeks through the chat box as
-// requests, applying each simulated week (and running the learner) after its last request.
-function Scrub({ user, state, progress, onReplay, onStop }: { user: string; state: ServerState; progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void }) {
-  const [picked, setWho] = useState<(typeof REPLAYS)[number][0]>("jordan");
-  // A sample person replays their own history, so acting as Jordan always shows Jordan's weeks.
-  // Only someone without one (You, or a person built from a request file) borrows a sample's.
-  const own = REPLAYS.find(([id]) => id === user)?.[0];
-  const who = own ?? picked;
+// Empties the person, then sends their requests through the chat box one by one. Weekly
+// transcripts apply each simulated week (and run the learner) after its last request; request
+// files are parsed line by line like typed sentences.
+function ReplayPerson({ user, state, progress, onReplay, onStop }: { user: string; state: ServerState; progress: { at: number; of: number } | null; onReplay: (r: Omit<Replay, "id">) => void; onStop: () => void }) {
+  const weekly = WEEKLY.includes(user);
+  const file = transcriptOf(user);
   const [loading, setLoading] = useState(false);
   const qc = useQueryClient();
-  const name = REPLAYS.find(([id]) => id === who)![1];
+  const clear = async () => {
+    await api(`/api/state/${user}/reset`, { blank: true });
+    await qc.invalidateQueries({ queryKey: stateKey(user) });
+  };
   const start = async () => {
     setLoading(true);
     try {
-      const { weeks } = await api<{ weeks: string[][] }>(`/api/learning/replay-plan/${who}?weeks=8`);
-      await api(`/api/state/${user}/reset`, { blank: true });
-      await qc.invalidateQueries({ queryKey: stateKey(user) });
+      if (!weekly) {
+        await clear();
+        onReplay({ lines: file!, fresh: true });
+        return;
+      }
+      const { weeks } = await api<{ weeks: string[][] }>(`/api/learning/replay-plan/${user}?weeks=8`);
+      await clear();
       const lines = weeks.flat();
       const lastOf = weeks.map((_, k) => weeks.slice(0, k + 1).flat().length - 1);
       let done = 0; // weeks applied so far
@@ -36,7 +45,7 @@ function Scrub({ user, state, progress, onReplay, onStop }: { user: string; stat
         // Applies every week whose last request has now been sent (empty weeks ride along).
         let after: ServerState | undefined;
         while (done < weeks.length && (lastOf[done] <= i || i === lines.length - 1)) {
-          after = await api(`/api/learning/${user}/replay`, { persona: who, weeks: weeks.length, week: done });
+          after = await api(`/api/learning/${user}/replay`, { persona: user, weeks: weeks.length, week: done });
           done++;
           await qc.invalidateQueries({ queryKey: stateKey(user) });
         }
@@ -49,29 +58,22 @@ function Scrub({ user, state, progress, onReplay, onStop }: { user: string; stat
       setLoading(false);
     }
   };
-  const busy = loading || !!progress;
+  const has = weekly || !!file?.length;
   return (
-    <section aria-label="Scrub time forward" className="flex flex-col gap-2">
-      <h2 className={heading}>Scrub time forward</h2>
-      <div className="flex gap-2">
-        {!own && (
-          <select aria-label="Sample person" value={who} onChange={(e) => setWho(e.target.value as typeof who)} disabled={busy}
-            className="min-h-10 rounded-lg border border-[#3A3F48] bg-ink px-2 text-sm text-white">
-            {REPLAYS.map(([id, n]) => <option key={id} value={id}>{n}</option>)}
-          </select>
-        )}
-        {progress ? (
-          <button type="button" onClick={onStop} className={`${btn} flex-1`}>Stop ({progress.at} of {progress.of})</button>
-        ) : (
-          <button type="button" disabled={busy} onClick={start} className={`${btn} flex-1`}>
-            {busy ? "Starting..." : `Replay ${name}'s last 8 weeks`}
-          </button>
-        )}
-      </div>
+    <div className="flex flex-col gap-2">
+      {progress ? (
+        <button type="button" onClick={onStop} className={btn}>Stop ({progress.at} of {progress.of})</button>
+      ) : (
+        <button type="button" disabled={!has || loading} onClick={start} className={btn}>
+          {loading ? "Starting..." : weekly ? `Replay ${state.name}'s last 8 weeks` : `Replay ${state.name}'s requests`}
+        </button>
+      )}
       <p className="m-0 text-xs text-faint">
-        Empties {state.name}'s calendar and what I've learned, then sends {own ? "their" : `${name}'s`} requests week by week while both grow back.
+        {has
+          ? `Empties ${state.name}'s calendar and what I've learned, then sends ${weekly ? "their requests week by week" : `their ${file!.length} requests one by one`} while both grow back.`
+          : `No transcript of ${state.name}'s requests to replay.`}
       </p>
-    </section>
+    </div>
   );
 }
 
@@ -125,8 +127,9 @@ export function DevTools({ open, onToggle, user, onUser, state, users, busy, onA
             className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#3A3F48] bg-ink px-2 text-sm text-white">
             {users.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
           </select>
-        <button type="button" onClick={() => reset.mutate(undefined)} className={btn}>Start over</button>
+          <button type="button" onClick={() => reset.mutate(undefined)} disabled={!!progress} className={btn}>Start over</button>
         </div>
+        {state && <ReplayPerson user={user} state={state} progress={progress} onReplay={onReplay} onStop={onStop} />}
       </section>
 
       <ReplayRequests progress={progress} onStop={onStop} onStart={async (lines) => {
@@ -135,7 +138,6 @@ export function DevTools({ open, onToggle, user, onUser, state, users, busy, onA
         onReplay({ lines, fresh: true });
       }} />
 
-      {state && <Scrub user={user} state={state} progress={progress} onReplay={onReplay} onStop={onStop} />}
       {state && <ActivityPanel steps={state.activity} mode={state.mode} busy={busy} onAsk={onAsk} />}
     </aside>
   );
