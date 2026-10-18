@@ -54,7 +54,10 @@ function userPrompt(p: Persona, req: DesignRequest, issues?: string[], previous?
   const long = evs.filter((e) => daysBetween(e.start, e.end) >= 6);
   const timed = evs.filter((e) => e.start.length > 10);
   const weekend = evs.filter((e) => [5, 6].includes((new Date(e.start.slice(0, 10)).getUTCDay() + 6) % 7));
-  const sample = [...mustShow(evs)].slice(0, 25).map((e) => `- ${e.title}: ${e.start} to ${e.end} [${e.category}]`);
+  // Listed as the prompt always has (this week from today, and long plans), so cached answers replay.
+  const sun = addDays(mondayOf(TODAY), 6);
+  const near = evs.filter((e) => overlaps(e, TODAY, sun) || (daysBetween(e.start.slice(0, 10), e.end.slice(0, 10)) >= 6 && e.end.slice(0, 10) >= TODAY));
+  const sample = near.slice(0, 25).map((e) => `- ${e.title}: ${e.start} to ${e.end} [${e.category}]`);
   // Counts per week, so a reason like "19 timed events this week" can be checked against the data.
   const weeks = Array.from({ length: 5 }, (_, i) => addDays(mondayOf(TODAY), i * 7)).map((mon, i) => {
     const inWeek = evs.filter((e) => overlaps(e, mon, addDays(mon, 6)));
@@ -97,6 +100,45 @@ function fit(p: Persona, spec: CalendarSpec): number {
 }
 
 type Draft = { title: string; reason: string; spec: CalendarSpec; score: number } | { none: string } | null;
+
+// Views that fit a habit shape well enough that the team always puts them on the table, so a live
+// run doesn't depend on a draft happening to find them: one column per night for someone whose
+// events run past midnight, and years above this year's 52 weeks for someone who plans years ahead
+// in week-long blocks. They still go through the critic, and a dismissed or undone one stays gone.
+function patternDraft(p: Persona, req: DesignRequest): { title: string; reason: string; spec: unknown } | null {
+  const s = p.profile.signals;
+  const fact = (re: RegExp) => p.profile.facts.map((f) => f.replace(/ \(confidence [\d.]+\)$/, "")).find((f) => re.test(f));
+  const types = new Set(Object.values(req.currentSpec.elements).map((e) => e.type));
+  const year = Number(TODAY.slice(0, 4));
+  const leaf = (type: string, props: Record<string, unknown>) => ({ type, props, children: [] as string[] });
+  let out: { title: string; reason: string; spec: unknown } | null = null;
+  if (typeof s.overnight === "number" && !types.has("NightGrid")) {
+    out = {
+      title: "Lay out your week by night?",
+      reason: `${fact(/past midnight/) ?? "Several of your events run past midnight"}. One column per night, from evening to morning, shows each one as a single block; the 52-week strip below shows the pattern across the year.`,
+      spec: { root: "s", elements: {
+        s: { type: "Stack", props: { direction: "column", gap: "md" }, children: ["w", "y"] },
+        w: leaf("NightGrid", { weekOf: focusWeek(), startHour: Math.max(12, Math.min(23, s.overnight - 1)), endHour: 8 }),
+        y: leaf("WeekStrip", { year, label: "Across the year" }),
+      } },
+    };
+  } else if (Number(s.horizonYears) >= 2 && p.events.some((e) => daysBetween(e.start, e.end) >= 6 && daysBetween(e.start, e.end) <= 31) && !(types.has("YearBand") && types.has("WeekStrip"))) {
+    const last = Math.max(year, ...p.events.map((e) => Number(e.end.slice(0, 4))));
+    out = {
+      title: "See your years and this year's weeks together?",
+      reason: `${fact(/years? ahead/) ?? "Your plans reach years ahead"}, but you also plan in week-long blocks. The years on top keep the long plans in view; the 52 weeks below show where the shorter blocks fit.`,
+      spec: { root: "s", elements: {
+        s: { type: "Stack", props: { direction: "column", gap: "lg" }, children: ["years", "weeks"] },
+        years: { type: "Section", props: { title: "Years", note: null }, children: ["band"] },
+        band: leaf("YearBand", { from: year, to: Math.min(last, year + 9), labels: "calendar" }),
+        weeks: { type: "Section", props: { title: "52 weeks", note: null }, children: ["strip"] },
+        strip: leaf("WeekStrip", { year, label: null }),
+      } },
+    };
+  }
+  if (!out || req.history.some((h) => h.title === out.title && h.status !== "suggested")) return null;
+  return out;
+}
 
 // One designer sub-agent: draft, run the critic, repair until it passes or runs out of tries.
 async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceStep[], system: string): Promise<Draft> {
@@ -174,13 +216,21 @@ export async function design(p: Persona, req: DesignRequest, system: string = sy
   trace.push({ role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${drafts} draft designer${drafts > 1 ? "s" : ""}${isLive() ? ` on ${MODELS.designer}` : " (offline mock: no CRUSOE_API_KEY)"}.` });
   const results = await Promise.all(Array.from({ length: drafts }, (_, n) => runDraft(n, p, req, trace, system)));
   const good = results.filter((d): d is Extract<Draft, { spec: CalendarSpec }> => !!d && "spec" in d);
+  const pattern = isLive() ? patternDraft(p, req) : null;
+  if (pattern) {
+    const verdict = critique(pattern.spec, p.events, req.currentSpec);
+    if (verdict.ok) {
+      trace.push({ role: "Critic", text: `The pattern draft "${pattern.title}" fits these habits and passed the checks, so it goes first.` });
+      good.unshift({ ...pattern, spec: verdict.spec!, score: Infinity });
+    } else trace.push({ role: "Critic", text: `Rejected the pattern draft "${pattern.title}": ${verdict.issues[0]}` });
+  }
   if (!good.length) {
     const none = results.find((d) => d && "none" in d);
     trace.push({ role: "Designer", text: none ? "Nothing to suggest right now." : "No draft passed the checks. Keeping the current view." });
     return { mode: mode(), proposal: null, trace };
   }
   good.sort((a, b) => b.score - a.score);
-  const best = isLive() && good.length > 1 ? await judge(p, good, trace) : good[0];
+  const best = isLive() && good.length > 1 && good[0].score !== Infinity ? await judge(p, good, trace) : good[0];
   trace.push({ role: "Designer", text: `Picked "${best.title}" out of ${good.length} passing draft${good.length > 1 ? "s" : ""}. Offering it as a suggestion.` });
   return {
     mode: mode(),
