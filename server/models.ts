@@ -12,7 +12,10 @@ export const MODELS = {
   intent: process.env.MODEL_INTENT ?? "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B",
 };
 
-type Role = keyof typeof MODELS;
+// Model ids from earlier runs whose cached answers still replay, so they aren't paid for twice.
+export const EARLIER_MODELS = ["openai/gpt-oss-120b"];
+
+export type Role = keyof typeof MODELS;
 const HINT: Record<Role, string> = { planner: "super", designer: "lightning", observer: "lightning", router: "nano", intent: "super" };
 // If the size-named model is missing, fall back to the next one that is likely there.
 const FALLBACK: Record<Role, string[]> = { planner: ["super", "ultra"], designer: ["lightning", "nano", "super"], observer: ["lightning", "nano", "super"], router: ["nano", "lightning"], intent: ["super", "lightning", "nano"] };

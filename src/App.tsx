@@ -6,6 +6,7 @@ import { LearnedPanel } from "./components/LearnedPanel";
 import { DevTools } from "./components/DevTools";
 import { PromptsPanel } from "./components/PromptsPanel";
 import { CommandBar, type Replay } from "./components/CommandBar";
+import type { Progress } from "./components/StopButton";
 import { ImportMenu } from "./components/ImportMenu";
 import { ViewSwitcher } from "./components/ViewSwitcher";
 
@@ -28,7 +29,7 @@ export default function App() {
   const react = useAction(user, ({ id, action }: { id: string; action: "accept" | "dismiss" | "revert" }) => api(`/api/proposals/${user}/${id}/${action}`, {}));
   const [dev, setDev] = useDevToolsOpen();
   const [replay, setReplay] = useState<Replay | null>(null);
-  const [progress, setProgress] = useState<{ at: number; of: number; stopping?: boolean } | null>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
   const stop = useRef(false);
   const halt = () => {
     stop.current = true;
@@ -51,27 +52,25 @@ export default function App() {
         {error && <div className="rounded-xl border border-[#F0B4B4] bg-[#FDECEC] p-3 text-sm">Can't reach the agent server: {error.message}</div>}
 
         {s && (
-          <>
-            <div className="flex flex-wrap items-start gap-5">
-              <main className="flex min-w-0 flex-[999_1_640px] flex-col gap-4 rounded-2xl border border-line bg-white p-5">
-                <ViewSwitcher user={user} spec={s.spec} />
-                <CalendarView user={user} spec={s.spec} events={s.events} />
-              </main>
+          <div className="flex flex-wrap items-start gap-5">
+            <main className="flex min-w-0 flex-[999_1_640px] flex-col gap-4 rounded-2xl border border-line bg-white p-5">
+              <ViewSwitcher user={user} spec={s.spec} />
+              <CalendarView user={user} spec={s.spec} events={s.events} />
+            </main>
 
-              <aside className="flex min-w-0 flex-[1_1_340px] flex-col gap-4">
-                {pending && <SuggestionCard proposal={pending} busy={react.isPending} onAccept={() => react.mutate({ id: pending.id, action: "accept" })} onDismiss={() => react.mutate({ id: pending.id, action: "dismiss" })} />}
-                {active && <ActiveChange proposal={active} busy={react.isPending} onRevert={() => react.mutate({ id: active.id, action: "revert" })} />}
-                <LearnedPanel user={user} state={s} />
-                <PromptsPanel user={user} state={s} />
-              </aside>
-            </div>
-          </>
+            <aside className="flex min-w-0 flex-[1_1_340px] flex-col gap-4">
+              {pending && <SuggestionCard proposal={pending} busy={react.isPending} onAccept={() => react.mutate({ id: pending.id, action: "accept" })} onDismiss={() => react.mutate({ id: pending.id, action: "dismiss" })} />}
+              {active && <ActiveChange proposal={active} busy={react.isPending} onRevert={() => react.mutate({ id: active.id, action: "revert" })} />}
+              <LearnedPanel user={user} state={s} />
+              <PromptsPanel user={user} state={s} />
+            </aside>
+          </div>
         )}
       </div>
       {/* Outside the state check, so switching to someone not loaded yet doesn't drop the chat. */}
       <div className={`fixed inset-x-0 bottom-0 z-20 border-t ${dev ? "lg:right-[380px]" : ""} border-line bg-subtle/90 px-4 pb-3 pt-2 backdrop-blur sm:px-6`}>
         <div className="mx-auto max-w-[1400px]">
-          <CommandBar user={user} replay={replay} onProgress={setProgress} stop={stop} onStop={halt}><ImportMenu user={user} /></CommandBar>
+          <CommandBar user={user} replay={replay} progress={progress} onProgress={setProgress} stop={stop} onStop={halt}><ImportMenu user={user} /></CommandBar>
         </div>
       </div>
       <DevTools open={dev} onToggle={() => setDev((o) => !o)} user={user} onUser={setUser} state={s} users={users} busy={ask.isPending || !!s?.designing} onAsk={() => ask.mutate(undefined)}

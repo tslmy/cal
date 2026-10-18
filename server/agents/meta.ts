@@ -5,16 +5,16 @@ import { isLive, structured } from "../llm";
 import { activePrompt, learnedSection, systemFor, withLearned } from "../prompts";
 import { design, systemPrompt } from "../designer";
 import { personaOf } from "../profile";
-import { isNovel } from "../routes/core";
+import { isNovel } from "../../src/shared/catalog";
+import { sameShape } from "../../src/shared/critic";
 import { PERSONAS } from "../../src/shared/personas";
-import type { AgentName, Belief, Interaction, PromptVersion, Proposal, UserState } from "../../src/shared/types";
+import { AGENTS, type AgentName, type Belief, type Interaction, type PromptVersion, type Proposal, type UserState } from "../../src/shared/types";
 
 // Meta-learner (E3 to E7): learns how the person wants to be adapted to, moves the proposal
 // threshold and gap, and rewrites every agent's learned prompt section, its own included.
 // A rewrite is replayed against this person and the sample personas before it is adopted.
 
 const ROLE = "Meta-learner";
-const AGENTS: AgentName[] = ["designer", "intent", "importer", "habit", "meta"];
 const OUTCOMES = new Set(["proposal_accepted", "proposal_dismissed", "proposal_reverted"]);
 const QUICK_REVERT_MS = 10 * 60_000;
 const REVERTS_TO_ROLL_BACK = 2;
@@ -228,8 +228,6 @@ async function writeSections(s: UserState, m: MetaPrefs): Promise<Record<AgentNa
 
 // ---------- E7: replay before adoption ----------
 
-const shape = (spec: Proposal["spec"]) => JSON.stringify(Object.values(spec.elements).map((e) => e.type + JSON.stringify(e.props)).sort());
-
 async function replay(s: UserState, designerLearned: string): Promise<{ ok: boolean; notes: string[] }> {
   const system = withLearned(systemPrompt(), designerLearned);
   const rejected = s.proposals.filter((p) => p.status === "dismissed" || p.status === "undone");
@@ -248,9 +246,12 @@ async function replay(s: UserState, designerLearned: string): Promise<{ ok: bool
         const failed = out.trace.some((t) => t.text.startsWith("No draft passed"));
         if (failed) ok = false;
         notes.push(`${r.name}: ${failed ? "no draft passed the critic" : "no change proposed"}`);
-      } else if (r.own && rejected.some((x) => x.title === p.title || shape(x.spec) === shape(p.spec))) {
+        return;
+      }
+      const again = r.own && rejected.find((x) => x.title === p.title || sameShape(x.spec, p.spec));
+      if (again) {
         ok = false;
-        notes.push(`${r.name}: would re-propose "${p.title}", which was ${rejected.find((x) => x.title === p.title || shape(x.spec) === shape(p.spec))!.status}`);
+        notes.push(`${r.name}: would re-propose "${p.title}", which was ${again.status}`);
       } else {
         notes.push(`${r.name}: "${p.title}" (${isNovel(p.spec) ? "invented" : "classic"}) passes the critic`);
       }

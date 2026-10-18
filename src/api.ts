@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { UserState } from "./shared/types";
@@ -22,6 +23,13 @@ export function useUserState(user: string) {
 
 export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: () => api<{ id: string; name: string; role: string }[]>("/api/users") });
+}
+
+// State that belongs to one person, such as a preview made for them: switching people hides it.
+export function usePerUser<T>(user: string): [T | null, (v: T | null) => void] {
+  const [held, setHeld] = useState<{ user: string; value: T } | null>(null);
+  const set = useCallback((value: T | null) => setHeld(value === null ? null : { user, value }), [user]);
+  return [held?.user === user ? held.value : null, set];
 }
 
 // A POST that refreshes the person's state when it lands. Failures show as a toast unless the

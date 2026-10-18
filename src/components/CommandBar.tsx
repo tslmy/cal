@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { api, useAction, useUserState, type ServerState } from "../api";
+import { api, useAction, usePerUser, useUserState, type ServerState } from "../api";
 import { ChangePreview } from "./ChangePreview";
+import { StopButton, type Progress } from "./StopButton";
 import { addDays, daysBetween, mondayOf } from "../shared/dates";
 import { PRECISIONS } from "../shared/when";
 import type { ChangeSet, EventDraft, Precision } from "../shared/types";
@@ -119,14 +120,11 @@ let started = 0; // the last replay id this page has run, kept outside the compo
 
 export type Replay = { id: number; lines: string[]; apply?: (i: number) => Promise<ServerState | undefined>; fresh?: boolean };
 
-export function CommandBar({ user, replay: request, onProgress, stop, onStop, children }: {
-  user: string; replay: Replay | null; onProgress: (p: { at: number; of: number } | null) => void; stop: React.RefObject<boolean>; onStop: () => void; children?: React.ReactNode;
+export function CommandBar({ user, replay: request, progress, onProgress, stop, onStop, children }: {
+  user: string; replay: Replay | null; progress: Progress | null; onProgress: (p: Progress | null) => void; stop: React.RefObject<boolean>; onStop: () => void; children?: React.ReactNode;
 }) {
   const [text, setText] = useState("");
-  // Tagged with the user it was parsed for, so switching users drops it.
-  const [pending, setPending] = useState<{ user: string; cs: ChangeSet } | null>(null);
-  const cs = pending?.user === user ? pending.cs : null;
-  const setCs = (c: ChangeSet | null) => setPending(c && { user, cs: c });
+  const [cs, setCs] = usePerUser<ChangeSet>(user);
   const [sent, setSent] = useState<Sent[]>([]);
   const nextId = useRef(0);
   const say = (t: string) => {
@@ -140,7 +138,6 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
   const through = (s: ServerState) => ({ through: s.interactions.length });
   const learnedThrough = useUserState(user).data?.learnedThrough ?? 0;
   const [asked, setAsked] = useState<number | null>(null); // the request behind the preview on screen
-  const [replay, setReplay] = useState<{ at: number; of: number; stopping?: boolean } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const parse = useAction(user, (t: string) => api<ChangeSet>(`/api/intent/${user}`, { text: t, source: "typed" }), { quiet: true });
   const apply = useAction(user, (c: ChangeSet) => api(`/api/changes/${user}/apply`, c), { quiet: true });
@@ -166,7 +163,7 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
     input.current?.focus();
   };
   const submit = () => {
-    if (!text.trim() || parse.isPending || replay) return;
+    if (!text.trim() || parse.isPending || progress) return;
     const id = say(text);
     setAsked(id);
     parse.mutate(text, {
@@ -204,7 +201,6 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
       });
     for (const [i, line] of lines.entries()) {
       if (stop.current) break;
-      setReplay({ at: i + 1, of: lines.length });
       onProgress({ at: i + 1, of: lines.length });
       const step = Math.min(applyLine ? 8 : 18, (applyLine ? 400 : 900) / line.length);
       for (let n = 1; n <= line.length && !stop.current; n++) {
@@ -233,7 +229,6 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
       await wait(250);
     }
     mark((l) => l.user === user && l.status === "reading", { status: "stopped" }); // a stopped scrub's unapplied week
-    setReplay(null);
     onProgress(null);
     setText("");
     if (failed) toast.error(`${failed} of ${lines.length} requests could not be applied`);
@@ -248,7 +243,7 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
   }, [request?.id]);
 
   const single = cs?.ops.length === 1 && cs.ops[0].op === "create" ? cs.ops[0].event : null;
-  const busy = parse.isPending || !!replay;
+  const busy = parse.isPending || !!progress;
 
   return (
     <div className="flex flex-col gap-2">
@@ -282,17 +277,15 @@ export function CommandBar({ user, replay: request, onProgress, stop, onStop, ch
             id="command"
             ref={input}
             value={text}
-            readOnly={!!replay}
+            readOnly={!!progress}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && (cs ? close() : setText(""))}
             placeholder={'Try "lunch with Ana Thursday around noon" or "empty out my weekend for a business trip"   ( / )'}
             autoComplete="off"
             className="min-h-11 min-w-0 flex-1 rounded-full border border-line-strong bg-white px-4 focus:border-ink focus:outline-none"
           />
-          {replay ? (
-            <button type="button" disabled={replay.stopping} onClick={() => { onStop(); setReplay((r) => r && { ...r, stopping: true }); }} className="min-h-11 shrink-0 rounded-full border border-line-strong bg-white px-4 font-semibold disabled:opacity-60">
-              {replay.stopping ? "Stopping..." : `Stop (${replay.at} of ${replay.of})`}
-            </button>
+          {progress ? (
+            <StopButton progress={progress} onStop={onStop} className="min-h-11 shrink-0 rounded-full border border-line-strong bg-white px-4 font-semibold disabled:opacity-60" />
           ) : (
             <button type="submit" disabled={busy || !text.trim()} className="min-h-11 shrink-0 rounded-full bg-[#0B84FE] px-4 font-semibold text-white disabled:opacity-60">
               {parse.isPending ? "Reading..." : "Send"}

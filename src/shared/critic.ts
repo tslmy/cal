@@ -1,5 +1,6 @@
 import { catalog, type CalendarSpec } from "./catalog";
 import type { CalEvent } from "./types";
+import { overlaps } from "./ops";
 import { addDays, daysBetween, endHourOf, hourOf, isoWeek, mondayOf, TODAY, weekday, weeksInIsoYear, mondayOfIsoWeek } from "./dates";
 
 // Mechanical checks the designer's drafts must pass. No LLM involved, so results are repeatable.
@@ -8,7 +9,6 @@ type El = CalendarSpec["elements"][string];
 
 const evStart = (e: CalEvent) => e.start.slice(0, 10);
 const evEnd = (e: CalEvent) => e.end.slice(0, 10);
-const overlaps = (e: CalEvent, from: string, to: string) => evStart(e) <= to && evEnd(e) >= from;
 
 // Throws for props that pass the schema but can't render: "2026-10-01" as a month, a weekOf that
 // isn't a date, a YearBand running backwards or over decades.
@@ -128,15 +128,14 @@ export function critique(spec: unknown, events: CalEvent[], current?: CalendarSp
   if (views.length && !views.some((v) => { const r = rangeOf(v)!; return (r[0] <= TODAY && r[1] >= TODAY) || (r[0] <= anchor && r[1] >= anchor); }))
     issues.push(`No view includes today (${TODAY}, week ${wk.week})${anchor > TODAY ? ` or the coming week (${anchor})` : ""}.`);
 
-  if (current && JSON.stringify(normalize(s)) === JSON.stringify(normalize(current))) issues.push("The proposal is the same as the current view.");
+  if (current && sameShape(s, current)) issues.push("The proposal is the same as the current view.");
 
   return { ok: issues.length === 0, issues, spec: s };
 }
 
-// Order-independent shape used to compare specs.
-function normalize(s: CalendarSpec) {
-  return Object.values(s.elements).map((e) => e.type + JSON.stringify(e.props)).sort();
-}
+// Whether two specs show the same components with the same props, whatever their keys and order.
+const shape = (s: CalendarSpec) => JSON.stringify(Object.values(s.elements).map((e) => e.type + JSON.stringify(e.props)).sort());
+export const sameShape = (a: CalendarSpec, b: CalendarSpec) => shape(a) === shape(b);
 
 // How many time periods two views have in common. Shared periods are what the app can animate between.
 export function sharedPeriods(a: CalendarSpec, b: CalendarSpec): number {

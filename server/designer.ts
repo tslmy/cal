@@ -5,7 +5,7 @@ import { overlaps } from "../src/shared/ops";
 import type { DesignRequest, DesignResponse, Persona, TraceStep } from "../src/shared/types";
 import { mockDraft } from "./mock";
 import { MODELS } from "./models";
-import { callModel, checkModels, crusoe, ModelError, parseJson } from "./llm";
+import { callModel, checkModels, isLive, mode, ModelError, parseJson } from "./llm";
 
 const DRAFTS = Number(process.env.DESIGNER_DRAFTS ?? 3);
 const REPAIRS = Number(process.env.DESIGNER_REPAIRS ?? 2);
@@ -106,7 +106,7 @@ async function runDraft(n: number, p: Persona, req: DesignRequest, trace: TraceS
   for (let round = 0; round <= REPAIRS; round++) {
     let raw: unknown;
     try {
-      raw = crusoe
+      raw = isLive()
         ? parseJson(await callModel(system, userPrompt(p, req, issues, previous), { role: "designer", temperature: 0.4 + n * 0.25 }))
         : mockDraft(p, req, n, round, system);
     } catch (err) {
@@ -170,20 +170,20 @@ async function judge(p: Persona, drafts: { title: string; reason: string; spec: 
 // `drafts` lets the meta-learner's replays run fewer drafts than a real proposal.
 export async function design(p: Persona, req: DesignRequest, system: string = systemPrompt(), drafts = DRAFTS): Promise<DesignResponse> {
   const trace: TraceStep[] = [];
-  if (crusoe) for (const note of await checkModels()) if (/^(planner|designer)|Could not/.test(note)) trace.push({ role: "Designer", text: note });
-  trace.push({ role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${drafts} draft designer${drafts > 1 ? "s" : ""}${crusoe ? ` on ${MODELS.designer}` : " (offline mock: no CRUSOE_API_KEY)"}.` });
+  if (isLive()) for (const note of await checkModels()) if (/^(planner|designer)|Could not/.test(note)) trace.push({ role: "Designer", text: note });
+  trace.push({ role: "Designer", text: `Read ${p.profile.facts.length} learned habits (confidence ${p.profile.confidence}). Spawning ${drafts} draft designer${drafts > 1 ? "s" : ""}${isLive() ? ` on ${MODELS.designer}` : " (offline mock: no CRUSOE_API_KEY)"}.` });
   const results = await Promise.all(Array.from({ length: drafts }, (_, n) => runDraft(n, p, req, trace, system)));
   const good = results.filter((d): d is Extract<Draft, { spec: CalendarSpec }> => !!d && "spec" in d);
   if (!good.length) {
     const none = results.find((d) => d && "none" in d);
     trace.push({ role: "Designer", text: none ? "Nothing to suggest right now." : "No draft passed the checks. Keeping the current view." });
-    return { mode: crusoe ? "live" : "mock", proposal: null, trace };
+    return { mode: mode(), proposal: null, trace };
   }
   good.sort((a, b) => b.score - a.score);
-  const best = crusoe && good.length > 1 ? await judge(p, good, trace) : good[0];
+  const best = isLive() && good.length > 1 ? await judge(p, good, trace) : good[0];
   trace.push({ role: "Designer", text: `Picked "${best.title}" out of ${good.length} passing draft${good.length > 1 ? "s" : ""}. Offering it as a suggestion.` });
   return {
-    mode: crusoe ? "live" : "mock",
+    mode: mode(),
     proposal: { id: `p${Date.now()}`, title: best.title, reason: best.reason, spec: best.spec },
     trace,
   };

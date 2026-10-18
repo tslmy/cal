@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, useAction } from "../api";
+import { api, useAction, usePerUser } from "../api";
 import { ChangePreview } from "./ChangePreview";
 import type { ChangeSet } from "../shared/types";
 
@@ -24,10 +24,7 @@ function parse(user: string, kind: Kind, files: { name: string; text: string }[]
 
 export function ImportMenu({ user }: { user: string }) {
   const [open, setOpen] = useState(false);
-  // Keyed by person so switching users drops a preview made for someone else.
-  const [pending, setPending] = useState<{ user: string; cs: ChangeSet } | null>(null);
-  const preview = pending?.user === user ? pending.cs : null;
-  const setPreview = (cs: ChangeSet | null) => setPending(cs && { user, cs });
+  const [preview, setPreview] = usePerUser<ChangeSet>(user);
   const [reading, setReading] = useState<string | null>(null);
   const inputs = useRef<Partial<Record<Kind, HTMLInputElement | null>>>({});
   const root = useRef<HTMLDivElement>(null);
@@ -39,7 +36,7 @@ export function ImportMenu({ user }: { user: string }) {
     const close = (e: KeyboardEvent | MouseEvent) => {
       if (e instanceof KeyboardEvent ? e.key === "Escape" : !root.current?.contains(e.target as Node)) {
         setOpen(false);
-        if (e instanceof KeyboardEvent) setPending(null);
+        if (e instanceof KeyboardEvent) setPreview(null);
       }
     };
     document.addEventListener("keydown", close);
@@ -48,7 +45,7 @@ export function ImportMenu({ user }: { user: string }) {
       document.removeEventListener("keydown", close);
       document.removeEventListener("mousedown", close);
     };
-  }, [open, preview]);
+  }, [open, preview, setPreview]);
 
   const pick = (k: Kind) => {
     setOpen(false);

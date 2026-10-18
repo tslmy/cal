@@ -1,7 +1,5 @@
 import { api, useAction } from "../api";
-import type { AgentName, UserState } from "../shared/types";
-
-const AGENTS: AgentName[] = ["designer", "intent", "importer", "habit", "meta"];
+import { AGENTS, type AgentName, type UserState } from "../shared/types";
 
 // Each agent's learned "About this person" section, its versions and rollback (E6, E7).
 export function PromptsPanel({ user, state }: { user: string; state: UserState }) {

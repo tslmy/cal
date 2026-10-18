@@ -69,3 +69,7 @@ export type CalendarSpec = {
   root: string;
   elements: Record<string, { type: string; props: Record<string, unknown>; children?: string[] }>;
 };
+
+// An invented view uses a component beyond the classic month and week grids (layout aside).
+const CLASSIC = new Set(["MonthGrid", "WeekGrid", "Stack", "Section"]);
+export const isNovel = (spec: CalendarSpec) => Object.values(spec.elements).some((e) => !CLASSIC.has(e.type));

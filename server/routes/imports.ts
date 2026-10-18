@@ -1,12 +1,11 @@
 import type { Express, Response } from "express";
 import { getUser, log, newId, update, activity } from "../store";
 import { dedupe, parseEmail, parseIcs, HOME_ZONE } from "../agents/importer";
+import { plural } from "../../src/shared/when";
 import type { ChangeSet, EventDraft, Source, UserState } from "../../src/shared/types";
 
 // .ics and email imports (P4, P6, P7). Both answer with a ChangeSet of creates for the preview;
 // applying it goes through /api/changes/:user/apply like every other change.
-
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 function changeSet(drafts: EventDraft[], state: UserState, source: Source, from: string): { cs: ChangeSet; dupes: number } {
   const { fresh, dupes } = dedupe(drafts, state);
@@ -23,8 +22,7 @@ const fail = (res: Response, err: unknown) => res.status(400).json({ error: `Cou
 export default function register(app: Express) {
   app.post("/api/import/:user/ics", async (req, res) => {
     const { user } = req.params;
-    const state = getUser(user);
-    if (!state) return res.status(404).json({ error: "no such user" });
+    const state = getUser(user)!;
     const text = req.body?.text as string | undefined;
     const name = (req.body?.name as string | undefined) ?? "calendar file";
     if (!text?.includes("BEGIN:VCALENDAR")) return res.status(400).json({ error: "That is not an .ics calendar file." });
@@ -43,8 +41,7 @@ export default function register(app: Express) {
 
   app.post("/api/import/:user/email", async (req, res) => {
     const { user } = req.params;
-    const state = getUser(user);
-    if (!state) return res.status(404).json({ error: "no such user" });
+    const state = getUser(user)!;
     const files = (req.body?.files ?? []) as { name: string; text: string }[];
     if (!files.length) return res.status(400).json({ error: "files are required" });
     let results;

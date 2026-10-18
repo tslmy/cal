@@ -1,12 +1,10 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { activity, DAY_ONE, getUser, log, newId, resetUser, update } from "../store";
 import { runLearner } from "../loop";
 import { personaById } from "../../src/shared/personas";
-import { daysBetween, mondayOf, TODAY, weekday } from "../../src/shared/dates";
-import { fmtDate, fmtWhen } from "../../src/shared/when";
-
-const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+import { DAY_KEYS, daysBetween, mondayOf, TODAY, weekday, WEEKDAY_NAMES } from "../../src/shared/dates";
+import { fmtDate, fmtWhen, plural } from "../../src/shared/when";
 import type { CalendarSpec } from "../../src/shared/catalog";
 import type { CalEvent, Interaction } from "../../src/shared/types";
 
@@ -21,19 +19,20 @@ const Replay = z.object({
 });
 
 const WEEK_MS = 7 * 86400000;
-const WEEK_VIEW: CalendarSpec = { root: "view", elements: { view: { type: "WeekGrid", props: { weekOf: mondayOf(TODAY), days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], startHour: 8, endHour: 18 }, children: [] } } };
+const WEEK_VIEW: CalendarSpec = { root: "view", elements: { view: { type: "WeekGrid", props: { weekOf: mondayOf(TODAY), days: [...DAY_KEYS], startHour: 8, endHour: 18 }, children: [] } } };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Habit learner, belief deletion, adaptation settings and the demo time-scrub.
 export default function register(app: Express) {
   app.post("/api/learning/:user/run", async (req, res) => {
-    if (!getUser(req.params.user)) return res.status(404).json({ error: "no such user" });
     await runLearner(req.params.user, "On request");
     res.json(getUser(req.params.user));
   });
 
   // P11: deleting a belief. The learner only re-learns it from evidence logged after this.
-  const remove = async (user: string, key: string) => {
+  // Both a DELETE and a POST, for clients that can only POST.
+  const remove = async (req: Request<{ user: string; key: string }>, res: Response) => {
+    const { user, key } = req.params;
     const b = await update(user, (s) => {
       const b = s.beliefs.find((x) => x.key === key);
       if (!b) return null;
@@ -41,25 +40,17 @@ export default function register(app: Express) {
       activity(s, b.level === "meta" ? "Meta-learner" : "Habit learner", `You deleted "${b.statement}". I'll only re-learn it from new evidence.`);
       return b;
     });
-    if (b) await log(user, "belief_deleted", { key, statement: b.statement, level: b.level, confidence: b.confidence, evidence: b.evidence.length }, "manual");
-    return b;
+    if (!b) return res.status(404).json({ error: "no such belief" });
+    await log(user, "belief_deleted", { key, statement: b.statement, level: b.level, confidence: b.confidence, evidence: b.evidence.length }, "manual");
+    res.json(getUser(user));
   };
-  app.delete("/api/learning/:user/beliefs/:key", async (req, res) => {
-    if (!getUser(req.params.user)) return res.status(404).json({ error: "no such user" });
-    if (!(await remove(req.params.user, req.params.key))) return res.status(404).json({ error: "no such belief" });
-    res.json(getUser(req.params.user));
-  });
-  app.post("/api/learning/:user/beliefs/:key/delete", async (req, res) => {
-    if (!getUser(req.params.user)) return res.status(404).json({ error: "no such user" });
-    if (!(await remove(req.params.user, req.params.key))) return res.status(404).json({ error: "no such belief" });
-    res.json(getUser(req.params.user));
-  });
+  app.delete("/api/learning/:user/beliefs/:key", remove);
+  app.post("/api/learning/:user/beliefs/:key/delete", remove);
 
   // P12: proposals on or off, and how often.
   app.post("/api/learning/:user/settings", async (req, res) => {
     const body = Settings.safeParse(req.body ?? {});
     if (!body.success) return res.status(400).json({ error: body.error.issues[0].message });
-    if (!getUser(req.params.user)) return res.status(404).json({ error: "no such user" });
     const before = await update(req.params.user, (s) => {
       const before = { ...s.settings };
       Object.assign(s.settings, body.data);
@@ -84,7 +75,6 @@ export default function register(app: Express) {
   app.post("/api/learning/:user/replay", async (req, res) => {
     const body = Replay.safeParse(req.body ?? {});
     if (!body.success) return res.status(400).json({ error: body.error.issues[0].message });
-    if (!getUser(req.params.user)) return res.status(404).json({ error: "no such user" });
     if (body.data.week !== undefined) {
       const { persona, weeks, week } = body.data;
       if (week === 0 && !body.data.line) await resetUser(req.params.user, true);
@@ -135,7 +125,7 @@ function sentences(batch: CalEvent[]): string[] {
     }
     const days = [...new Set(evs.map((x) => weekday(x.start.slice(0, 10))))];
     const at = e.start.length > 10 ? ` at ${e.start.slice(11, 16)}` : "";
-    const when = days.length === 5 && days.every((d) => d < 5) ? "every weekday" : days.map((d) => DAY_NAMES[d]).join(" and ");
+    const when = days.length === 5 && days.every((d) => d < 5) ? "every weekday" : days.map((d) => WEEKDAY_NAMES[d]).join(" and ");
     return `${title} ${when}${at}`;
   });
 }
@@ -168,7 +158,7 @@ async function replayWeek(user: string, persona: string, weeks: number, k: numbe
       add({ at: at(24 * (1 + 2 * n) + 9), kind: "view_switch", payload: { from: DAY_ONE, to, label: to === DAY_ONE ? "Month" : "Week" } });
       add({ at: at(24 * (1 + 2 * n) + 9.3), kind: "dwell", payload: { spec: to, seconds: 900 } });
     });
-    if (last) activity(s, "Replay", line !== undefined ? `Week ${k + 1} of ${weeks} done${switches.length ? `; ${p.name} switched views ${switches.length} times` : ""}.` : `Week ${k + 1} of ${weeks}: ${p.name} added ${created} event${created === 1 ? "" : "s"}${switches.length ? ` and switched views ${switches.length} times` : ""}.`);
+    if (last) activity(s, "Replay", line !== undefined ? `Week ${k + 1} of ${weeks} done${switches.length ? `; ${p.name} switched views ${switches.length} times` : ""}.` : `Week ${k + 1} of ${weeks}: ${p.name} added ${plural(created, "event")}${switches.length ? ` and switched views ${switches.length} times` : ""}.`);
   });
   if (!last) return;
   await runLearner(user, `Week ${k + 1}`, { learnedOnly: true });
