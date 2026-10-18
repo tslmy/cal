@@ -1,5 +1,7 @@
 # Evolve
 
+[![Tests](https://github.com/tslmy/cal/actions/workflows/test.yml/badge.svg)](https://github.com/tslmy/cal/actions/workflows/test.yml) [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tslmy/cal/badges/coverage.json)](https://github.com/tslmy/cal/actions/workflows/test.yml)
+
 A calendar that becomes more personal the more it is used. People add, change and remove events by typing a sentence or importing a file. A habit learner turns what they do into beliefs with confidence scores. When a belief crosses the threshold, the designer agent proposes one view change, which morphs in and can always be undone. A meta-learner watches how people react to those proposals and rewrites every agent's prompt to match, its own included.
 
 Built for the Crusoe Recursive Agents Hackathon. All agents run on Crusoe Managed Inference. Without a key, every agent falls back to an offline mock, so the whole demo also runs with no network.
@@ -13,6 +15,15 @@ npm run dev            # web on :5173, agents on :8787
 ```
 
 State is saved in `data/evolve.json`. To start everyone fresh, delete that file, or press **Start over** in the developer tools to reset one person.
+
+## Tests
+
+```bash
+npm test           # unit tests, offline (no model key, no replay cache, a throwaway state file)
+npm run coverage   # the same, with a coverage report in coverage/
+```
+
+Coverage counts the shared logic in `src/shared` and the agent server in `server`; the React components are not unit tested. CI runs the tests on every pull request and push, and each push to `main` refreshes the coverage badge from the `badges` branch.
 
 ## Demo (about 3 minutes, works offline)
 
