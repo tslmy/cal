@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, stateKey, type ServerState } from "../api";
 import type { CalendarSpec } from "../shared/catalog";
-import { mondayOf, TODAY } from "../shared/dates";
+import { DAY_KEYS, mondayOf, TODAY } from "../shared/dates";
 
 const year = Number(TODAY.slice(0, 4));
-const ALL = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const ALL = [...DAY_KEYS];
 const WORK = ALL.slice(0, 5);
 const one = (type: string, props: Record<string, unknown>): CalendarSpec => ({ root: "view", elements: { view: { type, props, children: [] } } });
 

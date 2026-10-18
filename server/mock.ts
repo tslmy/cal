@@ -1,6 +1,6 @@
-import type { CalendarSpec } from "../src/shared/catalog";
+import { isNovel, type CalendarSpec } from "../src/shared/catalog";
 import type { DesignRequest, Persona } from "../src/shared/types";
-import { addDays, mondayOf, TODAY } from "../src/shared/dates";
+import { addDays, DAY_KEYS, mondayOf, TODAY } from "../src/shared/dates";
 import { mustShow } from "../src/shared/critic";
 
 // Offline stand-in for the model, used when no CRUSOE_API_KEY is set.
@@ -11,8 +11,8 @@ const leaf = (type: string, props: Record<string, unknown>): El => ({ type, prop
 const one = (el: El): CalendarSpec => ({ root: "view", elements: { view: el } });
 
 const WEEK = mondayOf(TODAY);
-const ALL = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const WORK = ["mon", "tue", "wed", "thu", "fri"];
+const ALL = [...DAY_KEYS];
+const WORK = ALL.slice(0, 5);
 
 function hybrid(strips: number[], band: [number, number] | null): CalendarSpec {
   const elements: CalendarSpec["elements"] = {};
@@ -105,9 +105,6 @@ function habitDraft(p: Persona, req: DesignRequest, n: number, round: number, wh
   return say("Try a view designed for you?", reason, hybrid([2026, 2027, 2028], [2026, 2030]));
 }
 
-const CLASSIC = ["MonthGrid", "WeekGrid", "Stack", "Section"];
-const novel = (spec: CalendarSpec) => Object.values(spec.elements).some((e) => !CLASSIC.includes(e.type));
-
 // Plain month grids: this month plus the month each must-show plan starts in, so nothing is hidden.
 function classicDraft(p: Persona, req: DesignRequest): unknown {
   const months = [TODAY.slice(0, 7)];
@@ -132,5 +129,5 @@ export function mockDraft(p: Persona, req: DesignRequest, n: number, round: numb
     if (!draft.proposal || !declined.has(draft.proposal.title)) break;
     draft = habitDraft(p, req, n, round, who) as Out;
   }
-  return draft.proposal && novel(draft.proposal.spec) && /novelty appetite: low/i.test(system) ? classicDraft(p, req) : draft;
+  return draft.proposal && isNovel(draft.proposal.spec) && /novelty appetite: low/i.test(system) ? classicDraft(p, req) : draft;
 }

@@ -4,6 +4,8 @@ import type { CalEvent, Precision } from "./types";
 // Human wording for an event's time, shared by the intent agent's answers and the change preview.
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+export const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
 export function fmtDate(s: string): string {
   const d = parseDay(s);
   const year = s.slice(0, 4) === TODAY.slice(0, 4) ? "" : ` ${s.slice(0, 4)}`;

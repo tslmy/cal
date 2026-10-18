@@ -2,7 +2,8 @@ import { z } from "zod";
 import { activity, getUser, update } from "../store";
 import { isLive, structured } from "../llm";
 import { systemFor } from "../prompts";
-import { daysBetween, endHourOf, mondayOf, TODAY, weekday } from "../../src/shared/dates";
+import { daysBetween, endHourOf, mondayOf, MONTH_NAMES, TODAY, weekday, WEEKDAY_NAMES } from "../../src/shared/dates";
+import { plural } from "../../src/shared/when";
 import type { Belief, CalEvent, Interaction, InteractionKind, UserState } from "../../src/shared/types";
 
 // Habit learner (P8, E2): reads the interaction log and the events, never the UI, and keeps habit
@@ -10,8 +11,6 @@ import type { Belief, CalEvent, Interaction, InteractionKind, UserState } from "
 // Nano only rephrases them and nudges confidence a little.
 
 const ROLE = "Habit learner";
-const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const EVENT_KINDS: InteractionKind[] = ["create", "update", "delete", "import"];
 const SCALES = ["day", "week", "month", "quarter", "year"] as const;
 const REVERT = -0.15; // P10: revert is a strong negative
@@ -38,7 +37,6 @@ function scaleOf(e: CalEvent): (typeof SCALES)[number] {
   return days <= 1 ? "day" : days <= 20 ? "week" : days < 90 ? "month" : days < 300 ? "quarter" : "year";
 }
 
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 function fmtLength(min: number): string {
   if (min < 120) return plural(Math.round(min), "minute");
   if (min < 1440) return plural(Math.round(min / 60), "hour");

@@ -1,7 +1,7 @@
 import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { z } from "zod";
-import { MODELS, resolveModels } from "./models";
+import { EARLIER_MODELS, MODELS, resolveModels, type Role } from "./models";
 import { cached } from "./cache";
 
 // Shared model access for every agent: Crusoe's OpenAI-compatible endpoint, a per-model queue
@@ -19,7 +19,7 @@ const VALIDATION_RETRIES = 2;
 const FIRST_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 8000);
 const MAX_TOKENS = 64000;
 
-export const crusoe = process.env.CRUSOE_API_KEY
+const crusoe = process.env.CRUSOE_API_KEY
   ? createOpenAICompatible({ name: "crusoe", baseURL: BASE_URL, apiKey: process.env.CRUSOE_API_KEY })
   : null;
 export const isLive = () => !!crusoe;
@@ -74,22 +74,19 @@ async function slot<T>(model: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-export type Role = keyof typeof MODELS;
-
-// Model ids whose cached answers still replay, so earlier runs aren't paid for twice.
-const EARLIER = ["openai/gpt-oss-120b"];
+type CallOpts = { role?: Role; model?: string; temperature?: number; cache?: boolean };
 
 // One raw call. Throws ModelError for API problems.
 // Every call replays an earlier answer to the same system prompt, prompt and temperature from the
 // replay cache (the exact model first, then any model), so a rehearsed demo doesn't wait on (or
 // pay for) the same inference twice. `cache: false` forces a fresh call.
-export async function callModel(system: string, prompt: string, opts: { role?: Role; model?: string; temperature?: number; cache?: boolean } = {}): Promise<string> {
+export async function callModel(system: string, prompt: string, opts: CallOpts = {}): Promise<string> {
   // Every agent, not just the designer, needs the ids checked against what the endpoint serves.
   await checkModels();
   const model = opts.model ?? MODELS[opts.role ?? "designer"];
   if (opts.cache !== false) {
     const t = opts.temperature ?? 0.3;
-    const others = [...new Set([...Object.values(MODELS), ...EARLIER])].filter((m) => m !== model);
+    const others = [...new Set([...Object.values(MODELS), ...EARLIER_MODELS])].filter((m) => m !== model);
     return (await cached(["call", model, system, prompt, t], () => callModel(system, prompt, { ...opts, model, cache: false }),
       [["call", system, prompt, t], ...others.map((m) => ["call", m, system, prompt, t])])).value;
   }
@@ -146,7 +143,7 @@ export async function structured<S extends z.ZodType>(
   schema: S,
   system: string,
   prompt: string,
-  opts: { role?: Role; model?: string; temperature?: number; cache?: boolean } = {},
+  opts: CallOpts = {},
 ): Promise<z.infer<S>> {
   let last = "";
   let problem = "";

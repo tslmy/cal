@@ -7,8 +7,7 @@ import { parseIntent } from "../agents/intent";
 export default function register(app: Express) {
   app.post("/api/intent/:user", async (req, res) => {
     const user = req.params.user;
-    const s = getUser(user);
-    if (!s) return res.status(404).json({ error: "no such user" });
+    const s = getUser(user)!;
     const text = String(req.body?.text ?? "").trim();
     if (!text) return res.status(400).json({ error: "text is required" });
     const source = req.body?.source === "text" ? "text" : "typed";

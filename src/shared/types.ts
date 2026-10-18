@@ -87,7 +87,8 @@ export type Proposal = {
 
 // ---------- prompts (E6, E7) ----------
 
-export type AgentName = "intent" | "importer" | "habit" | "meta" | "designer";
+export const AGENTS = ["designer", "intent", "importer", "habit", "meta"] as const;
+export type AgentName = (typeof AGENTS)[number];
 
 export type PromptVersion = {
   agent: AgentName;

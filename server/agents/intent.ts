@@ -4,10 +4,10 @@ import { isLive, structured } from "../llm";
 import { newId } from "../store";
 import { systemFor } from "../prompts";
 import { cached } from "../cache";
-import { MODELS } from "../models";
-import { addDays, DAY_KEYS, daysBetween, mondayOf, MONTHS, TODAY, weekday, type DayKey } from "../../src/shared/dates";
+import { EARLIER_MODELS, MODELS } from "../models";
+import { addDays, DAY_KEYS, daysBetween, mondayOf, MONTH_NAMES, MONTHS, TODAY, weekday, WEEKDAY_NAMES, type DayKey } from "../../src/shared/dates";
 import { overlaps } from "../../src/shared/ops";
-import { fmtDate, fmtWhen } from "../../src/shared/when";
+import { fmtDate, fmtWhen, plural } from "../../src/shared/when";
 import type { CalEvent, ChangeSet, EventDraft, Operation, Precision, TraceStep, UserState } from "../../src/shared/types";
 
 // The intent agent: a typed sentence or a pasted note becomes a ChangeSet. The model (or the
@@ -72,16 +72,15 @@ const Plan = z.preprocess(tidyPlan, z.object({ steps: z.array(Step) }));
 type Step = z.infer<typeof Step>;
 type Filter = z.infer<typeof Filter>;
 
-const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const SAT = addDays(mondayOf(TODAY), 5); // "this weekend" is the current or coming Sat-Sun
 // Models are unreliable at weekday arithmetic, so the prompt spells out the next two weeks.
 const DATES = Array.from({ length: 15 }, (_, i) => addDays(TODAY, i))
-  .map((d, i) => `${WEEKDAYS[weekday(d)].slice(0, 3)} ${d}${i === 0 ? " (today)" : ""}`)
+  .map((d, i) => `${WEEKDAY_NAMES[weekday(d)].slice(0, 3)} ${d}${i === 0 ? " (today)" : ""}`)
   .join(", ");
 // A repeating event without an end date is filled in this far ahead.
 const REPEAT_WEEKS = 12;
 
-const CORE = `You turn what a person types or pastes into calendar operations. Today is ${WEEKDAYS[weekday(TODAY)]} ${TODAY}.
+const CORE = `You turn what a person types or pastes into calendar operations. Today is ${WEEKDAY_NAMES[weekday(TODAY)]} ${TODAY}.
 The next two weeks: ${DATES}.
 Reply with JSON only: {"steps": [...]}. Each step is one of:
 - {"op":"create","title","start","end","category","precision","repeat"?}
@@ -260,7 +259,6 @@ const ymd = (c: chrono.ParsedComponents) => `${c.get("year")}-${pad(c.get("month
 const hm = (c: chrono.ParsedComponents) => `${pad(c.get("hour")!)}:${pad(c.get("minute") ?? 0)}`;
 // Only next to a time: "about my refill" or "strict about that" is not a rough time.
 const APPROX = /\b(around|about|roughly|approximately)\s+(\d|noon|midnight)|\d\s*(am|pm)?-?ish\b|\bor so\b/i;
-const MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
 function when(text: string): When | null {
   let m: RegExpMatchArray | null;
@@ -277,7 +275,7 @@ function when(text: string): When | null {
     return { from: `${y1 + Number(m[1])}-01-01`, to: `${y1 + Number(m[2])}-12-31`, precision: "span", text: [m[0]] };
   }
   if ((m = text.match(new RegExp(`\\b(?:some ?time )?(?:in )?(${MONTH_NAMES.join("|")}|${MONTHS.join("|")})\\b(?! \\d)`, "i"))) && !/\bmay i\b/i.test(text)) {
-    const idx = MONTH_NAMES.findIndex((n) => n.startsWith(lc(m![1]).slice(0, 3)));
+    const idx = MONTH_NAMES.findIndex((n) => lc(n).startsWith(lc(m![1]).slice(0, 3)));
     const year = Number(TODAY.slice(0, 4)) + (idx + 1 < Number(TODAY.slice(5, 7)) ? 1 : 0);
     const from = `${year}-${pad(idx + 1)}-01`;
     const last = new Date(Date.UTC(year, idx + 1, 0)).getUTCDate();
@@ -429,10 +427,10 @@ export async function parseIntent(state: UserState, text: string, source: "typed
       const system = systemFor(CORE, state, "intent");
       // The plan holds filters, not event ids, so the same words replay correctly against today's
       // events. An exact hit needs the same model and prompt; failing that, any earlier plan for the
-      // same words is reused, including ones cached under the gpt-oss model used before.
+      // same words is reused, including ones cached under the models used before.
       const out = await cached([MODELS.intent, source, text.trim(), system], async () =>
         (await structured(Plan, system, prompt, { role: "intent", temperature: 0.1 })).steps,
-        [[source, text.trim()], ["openai/gpt-oss-120b", source, text.trim()]]);
+        [[source, text.trim()], ...EARLIER_MODELS.map((m) => [m, source, text.trim()])]);
       steps = out.value;
       if (out.hit) trace.push({ role: "Intent", text: "Reused the cached plan for this text." });
     } catch (err) {
@@ -444,6 +442,6 @@ export async function parseIntent(state: UserState, text: string, source: "typed
   if (source === "typed" && APPROX.test(text) && steps.length === 1 && steps[0].op === "create" && steps[0].precision === "exact") steps = [{ ...steps[0], precision: "approximate" }];
   const changeSet = resolve(state, steps, source);
   const quoted = text.length > 80 ? `${text.slice(0, 77).replace(/\s+/g, " ")}...` : text;
-  trace.push({ role: "Intent", text: `Read "${quoted}" as ${steps.length} step${steps.length === 1 ? "" : "s"} (${steps.map((x) => x.op).join(", ") || "none"}); resolved to ${changeSet.ops.length} operation${changeSet.ops.length === 1 ? "" : "s"}${isLive() ? "" : " (offline parser)"}.` });
+  trace.push({ role: "Intent", text: `Read "${quoted}" as ${plural(steps.length, "step")} (${steps.map((x) => x.op).join(", ") || "none"}); resolved to ${plural(changeSet.ops.length, "operation")}${isLive() ? "" : " (offline parser)"}.` });
   return { changeSet, trace, query: steps.some((x) => x.op === "query") };
 }
