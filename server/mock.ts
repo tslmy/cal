@@ -1,7 +1,7 @@
 import { isNovel, type CalendarSpec } from "../src/shared/catalog";
 import type { DesignRequest, Persona } from "../src/shared/types";
-import { addDays, DAY_KEYS, mondayOf, TODAY } from "../src/shared/dates";
-import { mustShow } from "../src/shared/critic";
+import { addDays, DAY_KEYS, TODAY } from "../src/shared/dates";
+import { focusWeek, mustShow } from "../src/shared/critic";
 
 // Offline stand-in for the model, used when no CRUSOE_API_KEY is set.
 // Some first drafts are deliberately flawed so the critic and repair loop have something to catch.
@@ -10,7 +10,8 @@ type El = CalendarSpec["elements"][string];
 const leaf = (type: string, props: Record<string, unknown>): El => ({ type, props, children: [] });
 const one = (el: El): CalendarSpec => ({ root: "view", elements: { view: el } });
 
-const WEEK = mondayOf(TODAY);
+// The week views are asked to show: next week on a weekend, as the critic expects.
+const WEEK = focusWeek();
 const ALL = [...DAY_KEYS];
 const WORK = ALL.slice(0, 5);
 

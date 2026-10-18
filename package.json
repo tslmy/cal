@@ -10,7 +10,9 @@
     "try-designer": "tsx scripts/try-designer.ts",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b && tsc --noEmit -p tsconfig.server.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.71",
@@ -38,11 +40,13 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/coverage-v8": "^5.0.5",
     "concurrently": "^10.0.6",
     "oxlint": "^1.81.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.5"
   }
 }
