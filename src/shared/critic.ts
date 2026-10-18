@@ -54,9 +54,12 @@ export const focusWeek = () => (weekday(TODAY) >= 5 ? addDays(mondayOf(TODAY), 7
 
 // Events the user must always be able to see: the rest of this week, and every plan of a week or
 // longer still ahead.
+// The week views are asked to show (focusWeek: next week on a weekend), so a draft that follows
+// that advice isn't then rejected for hiding the weekend that is ending.
 export function mustShow(events: CalEvent[]): CalEvent[] {
-  const sun = addDays(mondayOf(TODAY), 6);
-  return events.filter((e) => overlaps(e, TODAY, sun) || (daysBetween(evStart(e), evEnd(e)) >= 6 && evEnd(e) >= TODAY));
+  const from = focusWeek() > TODAY ? focusWeek() : TODAY;
+  const to = addDays(focusWeek(), 6);
+  return events.filter((e) => overlaps(e, from, to) || (daysBetween(evStart(e), evEnd(e)) >= 6 && evEnd(e) >= TODAY));
 }
 
 // Props the catalog marks nullable, which drafts often leave out instead of setting to null.
